@@ -1,0 +1,192 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GO_VERSION: "1.25.x"
+
+jobs:
+  metadata:
+    name: Read Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.meta.outputs.name }}
+      executable_name: ${{ steps.meta.outputs.executable_name }}
+      product_name: ${{ steps.meta.outputs.product_name }}
+      description: ${{ steps.meta.outputs.description }}
+      version: ${{ steps.meta.outputs.version }}
+      identifier: ${{ steps.meta.outputs.identifier }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        shell: bash
+        run: |
+          META="build/metadata/app.json"
+          echo "name=$(jq -r '.name' "$META")" >> "$GITHUB_OUTPUT"
+          echo "executable_name=$(jq -r '.executableName' "$META")" >> "$GITHUB_OUTPUT"
+          echo "product_name=$(jq -r '.productName' "$META")" >> "$GITHUB_OUTPUT"
+          echo "description=$(jq -r '.description' "$META")" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r '.version' "$META")" >> "$GITHUB_OUTPUT"
+          echo "identifier=$(jq -r '.identifier' "$META")" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux ${{ matrix.goarch }}
+    needs: metadata
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build
+        shell: bash
+        run: |
+          OUT="dist/${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}"
+          mkdir -p "$OUT/icons" "$OUT/linux"
+          GOOS=linux GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build \
+            -ldflags "-X nyxbot-go/internal/version.Version=${{ needs.metadata.outputs.version }} -X nyxbot-go/internal/version.Commit=${{ github.sha }}" \
+            -o "$OUT/${{ needs.metadata.outputs.executable_name }}" ./cmd/server
+          cp -r resources "$OUT/resources"
+          cp config.yaml "$OUT/config.yaml"
+          cp build/icons/icon.png "$OUT/icons/icon.png"
+          cp build/icons/icon.svg "$OUT/icons/icon.svg"
+          cp build/linux/NyxBot.desktop "$OUT/linux/NyxBot.desktop"
+          cp build/release/NOTES.md "$OUT/RELEASE_NOTES.md"
+          tar -czf "${OUT}.tar.gz" -C dist "${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}
+          path: dist/${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}.tar.gz
+
+  macos:
+    name: macOS ${{ matrix.goarch }}
+    needs: metadata
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build app bundle
+        shell: bash
+        run: |
+          APP="dist/${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          GOOS=darwin GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build \
+            -ldflags "-X nyxbot-go/internal/version.Version=${{ needs.metadata.outputs.version }} -X nyxbot-go/internal/version.Commit=${{ github.sha }}" \
+            -o "$APP/Contents/MacOS/${{ needs.metadata.outputs.executable_name }}" ./cmd/server
+          cp build/macos/Info.plist "$APP/Contents/Info.plist"
+          ICONSET="dist/icon.iconset"
+          mkdir -p "$ICONSET"
+          sips -z 16 16 build/icons/icon.png --out "$ICONSET/icon_16x16.png"
+          sips -z 32 32 build/icons/icon.png --out "$ICONSET/icon_16x16@2x.png"
+          sips -z 32 32 build/icons/icon.png --out "$ICONSET/icon_32x32.png"
+          sips -z 64 64 build/icons/icon.png --out "$ICONSET/icon_32x32@2x.png"
+          sips -z 128 128 build/icons/icon.png --out "$ICONSET/icon_128x128.png"
+          sips -z 256 256 build/icons/icon.png --out "$ICONSET/icon_128x128@2x.png"
+          sips -z 256 256 build/icons/icon.png --out "$ICONSET/icon_256x256.png"
+          sips -z 512 512 build/icons/icon.png --out "$ICONSET/icon_256x256@2x.png"
+          sips -z 512 512 build/icons/icon.png --out "$ICONSET/icon_512x512.png"
+          cp build/icons/icon.png "$ICONSET/icon_512x512@2x.png"
+          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/icon.icns"
+          cp build/icons/icon.svg "$APP/Contents/Resources/icon.svg"
+          cp -r resources "$APP/Contents/Resources/resources"
+          cp build/release/NOTES.md "dist/RELEASE_NOTES-darwin-${{ matrix.goarch }}.md"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}
+          path: |
+            dist/${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}.zip
+            dist/RELEASE_NOTES-darwin-${{ matrix.goarch }}.md
+
+  windows:
+    name: Windows amd64
+    needs: metadata
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install goversioninfo
+        shell: pwsh
+        run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+      - name: Build
+        shell: pwsh
+        run: |
+          goversioninfo -icon="build/icons/windows.ico" -o="cmd/server/resource.syso" "build/windows/versioninfo.json"
+          $ldflags = "-X nyxbot-go/internal/version.Version=${{ needs.metadata.outputs.version }} -X nyxbot-go/internal/version.Commit=${{ github.sha }}"
+          $out = "dist/${{ needs.metadata.outputs.executable_name }}-windows-amd64"
+          New-Item -ItemType Directory -Path $out | Out-Null
+          go build -ldflags $ldflags -o "$out/${{ needs.metadata.outputs.executable_name }}.exe" ./cmd/server
+          Copy-Item -Recurse -LiteralPath "resources" -Destination "$out/resources"
+          Copy-Item -LiteralPath "config.yaml" -Destination "$out/config.yaml"
+          Copy-Item -LiteralPath "build/release/NOTES.md" -Destination "$out/RELEASE_NOTES.md"
+          Compress-Archive -Path "$out/*" -DestinationPath "$out.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.metadata.outputs.executable_name }}-windows-amd64
+          path: dist/${{ needs.metadata.outputs.executable_name }}-windows-amd64.zip
+
+  docker:
+    name: Docker Image
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            kingprimes/nyxbot-go
+            ghcr.io/${{ github.repository_owner }}/nyxbot-go
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.metadata.outputs.version }}
+            PRODUCT_NAME=${{ needs.metadata.outputs.product_name }}
+            DESCRIPTION=${{ needs.metadata.outputs.description }}
+            VCS_REF=${{ github.sha }}
+            COMMIT=${{ github.sha }}

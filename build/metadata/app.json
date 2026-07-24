@@ -1,0 +1,10 @@
+{
+  "name": "NyxBot",
+  "executableName": "NyxBot",
+  "productName": "NyxBot",
+  "description": "NyxBot Server",
+  "companyName": "NyxBot",
+  "version": "1.0.0",
+  "identifier": "com.nyxbot.server",
+  "copyright": "Copyright (c) 2026 NyxBot"
+}

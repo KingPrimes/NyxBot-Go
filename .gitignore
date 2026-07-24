@@ -1,0 +1,15 @@
+.env
+.idea/
+.vscode/
+*.exe
+*.log
+*.syso
+/tmp/
+/dist/
+/data/
+/resources/static/*
+!/resources/static/.gitkeep
+admin-credentials.txt
+versioninfo.json
+AGENTS.md
+plans/

@@ -1,0 +1,24 @@
+server:
+  host: "0.0.0.0"
+  port: "8080"
+  static_dir: "./resources/static"
+  gin_mode: "release"
+  request_log: false
+  trusted_proxies: []
+
+database:
+  path: "data/nyxbot.db"
+
+log:
+  startup: true
+  console: true
+  dir: "data/logs"
+  max_file_size_mb: 5
+  max_age_days: 7
+  history_size: 50
+
+bot:
+  ws_url: "/ws/shiro"
+
+auth:
+  jwt_secret: "nyxbot-secret-key"

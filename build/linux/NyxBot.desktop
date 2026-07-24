@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=NyxBot
+Comment=NyxBot Server
+Exec=NyxBot
+Icon=nyxbot
+Terminal=true
+Categories=Utility;
