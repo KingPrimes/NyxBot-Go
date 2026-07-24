@@ -1,3 +1,5 @@
+// Package logging 自实现的日志系统，支持 slog 风格分级、文件轮转、控制台输出
+// 和 SSE 实时日志订阅。替代 Go 标准 log 包和第三方日志库。
 package logging
 
 import (
@@ -13,29 +15,33 @@ import (
 	"time"
 )
 
+// Level 日志级别类型。
 type Level string
 
 const (
-	LevelTrace Level = "TRACE"
-	LevelDebug Level = "DEBUG"
-	LevelInfo  Level = "INFO"
-	LevelWarn  Level = "WARN"
-	LevelError Level = "ERROR"
-	LevelPanic Level = "PANIC"
-	LevelHTTP  Level = "HTTP"
+	LevelTrace Level = "TRACE" // 跟踪级别
+	LevelDebug Level = "DEBUG" // 调试级别
+	LevelInfo  Level = "INFO"  // 信息级别
+	LevelWarn  Level = "WARN"  // 警告级别
+	LevelError Level = "ERROR" // 错误级别
+	LevelPanic Level = "PANIC" // 恐慌级别
+	LevelHTTP  Level = "HTTP"  // HTTP 请求日志
 )
 
+// Entry 单条日志条目，包含时间、级别、来源包、协程和消息。
 type Entry struct {
 	Time    time.Time `json:"time"`
 	Level   Level     `json:"level"`
-	Pack    string    `json:"pack"`
-	Thread  string    `json:"thread"`
+	Pack    string    `json:"pack"`    // 来源包名
+	Thread  string    `json:"thread"`  // goroutine ID
 	Message string    `json:"message"`
-	Fields  string    `json:"fields,omitempty"`
+	Fields  string    `json:"fields,omitempty"` // 扩展字段
 }
 
+// Subscriber 日志订阅者通道，用于 SSE 实时推送。
 type Subscriber chan Entry
 
+// Config 日志初始配置参数（Init 时传入）。
 type Config struct {
 	Dir            string
 	MaxFileSize    int64
@@ -60,6 +66,7 @@ var (
 	}
 )
 
+// Init 初始化日志系统，可多次调用以重新配置。
 func Init(cfg Config) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -93,6 +100,7 @@ func Init(cfg Config) {
 	}
 }
 
+// Subscribe 创建一个新的日志订阅者通道，用于实时接收日志条目。
 func Subscribe(buffer int) Subscriber {
 	if buffer <= 0 {
 		buffer = 64
@@ -105,6 +113,7 @@ func Subscribe(buffer int) Subscriber {
 	return ch
 }
 
+// Unsubscribe 取消订阅并关闭通道。
 func Unsubscribe(ch Subscriber) {
 	mu.Lock()
 	if _, ok := subscribers[ch]; ok {
@@ -114,54 +123,67 @@ func Unsubscribe(ch Subscriber) {
 	mu.Unlock()
 }
 
+// Info 记录 INFO 级别日志，自动从调用栈推断来源包名。
 func Info(message string, args ...any) {
 	write(LevelInfo, 2, message, args...)
 }
 
+// InfoPack 记录 INFO 级别日志，显式指定来源包名。
 func InfoPack(pack string, message string, args ...any) {
 	writePack(LevelInfo, pack, message, args...)
 }
 
+// Debug 记录 DEBUG 级别日志，自动推断来源包名。
 func Debug(message string, args ...any) {
 	write(LevelDebug, 2, message, args...)
 }
 
+// DebugPack 记录 DEBUG 级别日志，显式指定来源包名。
 func DebugPack(pack string, message string, args ...any) {
 	writePack(LevelDebug, pack, message, args...)
 }
 
+// Trace 记录 TRACE 级别日志，自动推断来源包名。
 func Trace(message string, args ...any) {
 	write(LevelTrace, 2, message, args...)
 }
 
+// TracePack 记录 TRACE 级别日志，显式指定来源包名。
 func TracePack(pack string, message string, args ...any) {
 	writePack(LevelTrace, pack, message, args...)
 }
 
+// Warn 记录 WARN 级别日志，自动推断来源包名。
 func Warn(message string, args ...any) {
 	write(LevelWarn, 2, message, args...)
 }
 
+// WarnPack 记录 WARN 级别日志，显式指定来源包名。
 func WarnPack(pack string, message string, args ...any) {
 	writePack(LevelWarn, pack, message, args...)
 }
 
+// Error 记录 ERROR 级别日志，自动推断来源包名。
 func Error(message string, args ...any) {
 	write(LevelError, 2, message, args...)
 }
 
+// ErrorPack 记录 ERROR 级别日志，显式指定来源包名。
 func ErrorPack(pack string, message string, args ...any) {
 	writePack(LevelError, pack, message, args...)
 }
 
+// Panic 记录 PANIC 级别日志，自动推断来源包名。
 func Panic(message string, args ...any) {
 	write(LevelPanic, 2, message, args...)
 }
 
+// PanicPack 记录 PANIC 级别日志，显式指定来源包名。
 func PanicPack(pack string, message string, args ...any) {
 	writePack(LevelPanic, pack, message, args...)
 }
 
+// HTTP 记录 HTTP 请求日志（固定 pack="http"），由中间件调用。
 func HTTP(status int, method, path string, latency time.Duration, clientIP string) {
 	entry := Entry{
 		Time:    time.Now(),
@@ -203,6 +225,7 @@ func output(entry Entry) {
 	broadcast(entry)
 }
 
+// Recent 返回内存中缓存的、级别不低于 min 的历史日志。
 func Recent(min Level) []Entry {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -250,14 +273,17 @@ func appendHistory(entry Entry) {
 	history = append(history, entry)
 }
 
+// SetLevel 设置全局最低日志级别。
 func SetLevel(level Level) {
 	current = level
 }
 
+// LevelEnabled 判断指定级别是否被当前全局级别允许。
 func LevelEnabled(level Level) bool {
 	return levelAllowed(level, current)
 }
 
+// TrimLevel 将字符串解析为 Level，不合法时返回 LevelInfo。
 func TrimLevel(s string) Level {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "TRACE":
@@ -477,14 +503,17 @@ func (f *fileLogger) Close() error {
 	return nil
 }
 
+// FileLoggerDir 返回日志文件目录路径。
 func FileLoggerDir() string {
 	return config.Dir
 }
 
+// FileLoggerPattern 返回日志文件的 Glob 匹配模式。
 func FileLoggerPattern() string {
 	return filepath.Join(config.Dir, "*.log")
 }
 
+// LogFilePaths 返回所有日志文件的路径列表（按文件名排序）。
 func LogFilePaths() []string {
 	files, _ := filepath.Glob(FileLoggerPattern())
 	sort.Strings(files)

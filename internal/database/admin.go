@@ -1,3 +1,5 @@
+// Package database 数据持久化层，基于 GORM + pure-Go SQLite。
+// 替代 Java 项目的 JPA/H2，启动时自动建表并初始化默认管理员。
 package database
 
 import (
@@ -23,6 +25,7 @@ var executableDir = func() (string, error) {
 	return filepath.Dir(exePath), nil
 }
 
+// ensureDefaultAdmin 检查是否存在系统用户，无则创建随机初始管理员并写入凭据文件。
 func ensureDefaultAdmin() error {
 	var count int64
 	if err := DB.Model(&system.SysUser{}).Count(&count).Error; err != nil {
@@ -61,6 +64,8 @@ func ensureDefaultAdmin() error {
 	return nil
 }
 
+// writeAdminCredentials 将初始管理员凭据写入可执行文件同级的 admin-credentials.txt。
+// 若文件已存在则跳过（不覆盖）。
 func writeAdminCredentials(username, password string) error {
 	dir, err := executableDir()
 	if err != nil {
@@ -83,6 +88,7 @@ func writeAdminCredentials(username, password string) error {
 	return os.WriteFile(path, []byte(content), 0600)
 }
 
+// randomLetters 生成指定长度的随机字母串，用于初始密码生成。
 func randomLetters(length int) (string, error) {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	result := make([]byte, length)

@@ -11,6 +11,7 @@ const (
 	MarketSortDamageDesc MarketSortBy = "DAMAGE_DESC"
 )
 
+// Value 返回排序方式的 API 参数字符串。
 func (m MarketSortBy) Value() string {
 	mp := map[MarketSortBy]string{
 		MarketSortPriceAsc: "price_asc", MarketSortPriceDesc: "price_desc",
@@ -28,6 +29,7 @@ const (
 	MarketSearchAuction MarketSearchPolicy = "AUCTION"
 )
 
+// Value 返回搜索策略的 API 参数字符串。
 func (m MarketSearchPolicy) Value() string {
 	mp := map[MarketSearchPolicy]string{
 		MarketSearchAny: "any", MarketSearchDirect: "direct", MarketSearchAuction: "auction",
@@ -49,6 +51,7 @@ const (
 	MarketElemAny        MarketSearchElement = "ANY"
 )
 
+// Element 返回元素类型的小写 API 参数。
 func (m MarketSearchElement) Element() string {
 	mp := map[MarketSearchElement]string{
 		MarketElemCold: "cold", MarketElemRadiation: "radiation", MarketElemHeat: "heat",
@@ -69,6 +72,7 @@ const (
 	MarketPlatformMobile MarketPlatform = "MOBILE"
 )
 
+// Platform 返回平台的小写 API 参数。
 func (m MarketPlatform) Platform() string {
 	mp := map[MarketPlatform]string{
 		MarketPlatformPC: "pc", MarketPlatformPS4: "ps4",

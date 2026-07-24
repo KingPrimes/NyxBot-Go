@@ -34,6 +34,7 @@ const (
 	MTCorruption       MissionType = "MT_CORRUPTION"
 )
 
+// Name 返回任务类型的中文名称。
 func (m MissionType) Name() string {
 	mp := map[MissionType]string{
 		MTExtermination: "歼灭", MTSurvival: "生存", MTRescue: "救援",
@@ -70,6 +71,7 @@ const (
 	SubDuviriCycle  SubscribeType = "DUVIRI_CYCLE"
 )
 
+// Name 返回订阅类型的中文名称。
 func (s SubscribeType) Name() string {
 	mp := map[SubscribeType]string{
 		SubAlerts: "警报", SubArbitration: "仲裁", SubCetusCycle: "夜灵平野",
@@ -104,6 +106,7 @@ const (
 	InvRewardExilusAdapter  InvasionReward = "EXILUS_ADAPTER"
 )
 
+// Name 返回入侵特殊奖励的中文名称。
 func (i InvasionReward) Name() string {
 	mp := map[InvasionReward]string{
 		InvRewardNone:            "无",
@@ -129,6 +132,7 @@ const (
 	RivenTrendMelee    RivenTrendType = "MELEE"
 )
 
+// Desc 返回紫卡倾向武器类型的中文描述。
 func (r RivenTrendType) Desc() string {
 	mp := map[RivenTrendType]string{
 		RivenTrendRifle:   "步枪-狙击枪",
@@ -140,6 +144,7 @@ func (r RivenTrendType) Desc() string {
 	return mp[r]
 }
 
+// Value 返回紫卡倾向武器类型的枚举数值。
 func (r RivenTrendType) Value() int {
 	mp := map[RivenTrendType]int{
 		RivenTrendRifle: 0, RivenTrendShotgun: 1,

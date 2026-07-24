@@ -1,3 +1,4 @@
+// Package database 数据库初始化与管理员创建单元测试。
 package database
 
 import (
@@ -11,6 +12,7 @@ import (
 	"nyxbot-go/internal/model/system"
 )
 
+// TestWriteAdminCredentialsDoesNotOverwriteExistingFile 验证已存在的凭据文件不会被覆盖。
 func TestWriteAdminCredentialsDoesNotOverwriteExistingFile(t *testing.T) {
 	tmp := t.TempDir()
 	old, _ := os.Getwd()
@@ -38,6 +40,7 @@ func TestWriteAdminCredentialsDoesNotOverwriteExistingFile(t *testing.T) {
 	}
 }
 
+// TestEnsureDefaultAdminCreatesCredentials 验证无管理员时自动创建凭证文件。
 func TestEnsureDefaultAdminCreatesCredentials(t *testing.T) {
 	tmp := t.TempDir()
 	old, _ := os.Getwd()

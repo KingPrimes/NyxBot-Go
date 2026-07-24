@@ -1,3 +1,4 @@
+// Package web 托管前端静态文件并提供 SPA 路由兜底（NoRoute 返回 index.html）。
 package web
 
 import (
@@ -9,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// RegisterStaticRoutes 注册静态文件路由和 Vue SPA 兜底路由。
+// 已构建的前端 dist 目录应存放于 staticDir 下。
 func RegisterStaticRoutes(r *gin.Engine, staticDir string) {
 	r.Static("/static", filepath.Join(staticDir, "static"))
 	r.StaticFile("/favicon.ico", filepath.Join(staticDir, "favicon.ico"))

@@ -44,6 +44,7 @@ const (
 	TransNone TransactionType = "NONE"
 )
 
+// Name 返回交易类型的小写英文名称。
 func (t TransactionType) Name() string {
 	mp := map[TransactionType]string{
 		TransSell: "sell", TransBuy: "buy",

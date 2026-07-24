@@ -9,6 +9,7 @@ const (
 	AsyncInitData AsyncBeanName = "InitData"
 )
 
+// Str 返回异步执行器的 Bean 名称字符串。
 func (a AsyncBeanName) Str() string {
 	mp := map[AsyncBeanName]string{
 		AsyncMyAsync: "myAsync", AsyncService: "scheduledExecutorService",
@@ -48,6 +49,7 @@ const (
 	SearchTypeSister SearchType = "SISTER"
 )
 
+// Type 返回搜索类型的小写 API 参数。
 func (s SearchType) Type() string {
 	mp := map[SearchType]string{
 		SearchTypeLich: "lich", SearchTypeSister: "sister",
@@ -92,6 +94,7 @@ const (
 	ProductShotguns         ProductCategory = "Shotguns"
 )
 
+// Name 返回产品分类的中文名称。
 func (p ProductCategory) Name() string {
 	mp := map[ProductCategory]string{
 		ProductPistols: "次要武器", ProductLongGuns: "主要武器",

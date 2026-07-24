@@ -18,8 +18,10 @@ import (
 	"nyxbot-go/internal/model/warframe"
 )
 
+// DB 全局数据库连接实例，包内各处直接引用。
 var DB *gorm.DB
 
+// Init 初始化 SQLite 数据库连接，执行自动迁移和默认管理员创建。
 func Init(dbPath string, startupLog bool) {
 	if dbPath == "" {
 		dbPath = "data/nyxbot.db"
@@ -55,6 +57,7 @@ func Init(dbPath string, startupLog bool) {
 	}
 }
 
+// autoMigrate 自动创建/更新所有注册的数据表结构。
 func autoMigrate() error {
 	return DB.AutoMigrate(
 		&warframe.Alias{},

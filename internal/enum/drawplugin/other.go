@@ -112,6 +112,7 @@ const (
 	RivenTrend5 RivenTrend = "RIVEN_TREND_5"
 )
 
+// Doc 返回紫卡倾向的视觉表示（●○○○○ ~ ●●●●●）。
 func (r RivenTrend) Doc() string {
 	mp := map[RivenTrend]string{
 		RivenTrend1: "●○○○○", RivenTrend2: "●●○○○",

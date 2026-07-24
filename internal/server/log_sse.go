@@ -1,3 +1,4 @@
+// Package server Gin 路由、中间件、响应格式和 SSE 日志流推送。
 package server
 
 import (
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"nyxbot-go/internal/logging"
+	"nyxbot-go/internal/response"
 )
 
 type logSSESession struct {
@@ -94,7 +96,7 @@ func logSSEStats(c *gin.Context) {
 	connections := len(logSSESessions)
 	logSSEMu.RUnlock()
 
-	Success(c, gin.H{
+	response.Success(c, gin.H{
 		"connections": connections,
 		"activeConnections": connections,
 		"protocol": "SSE (Server-Sent Events)",
@@ -104,13 +106,13 @@ func logSSEStats(c *gin.Context) {
 func updateLogSSEFilter(c *gin.Context) {
 	sessionID := c.Query("sessionId")
 	if sessionID == "" {
-		Fail(c, 400, "sessionId不能为空")
+		response.Fail(c, 400, "sessionId不能为空")
 		return
 	}
 
 	var filter logFilterConfig
 	if err := c.ShouldBindJSON(&filter); err != nil {
-		Fail(c, 400, "无效的过滤配置")
+		response.Fail(c, 400, "无效的过滤配置")
 		return
 	}
 
@@ -123,36 +125,36 @@ func updateLogSSEFilter(c *gin.Context) {
 	logSSEMu.Unlock()
 
 	if !ok {
-		Fail(c, 400, "会话不存在")
+		response.Fail(c, 400, "会话不存在")
 		return
 	}
 
 	logging.InfoPack("server.sse", "SSE filter updated: sessionId=%s", sessionID)
-	Success(c, gin.H{"config": session.filter})
+	response.Success(c, gin.H{"config": session.filter})
 }
 
 func resetLogSSEFilter(c *gin.Context) {
 	sessionID := c.Query("sessionId")
 	if sessionID == "" {
-		Fail(c, 400, "sessionId不能为空")
+		response.Fail(c, 400, "sessionId不能为空")
 		return
 	}
 
 	logSSEMu.Lock()
 	session, ok := logSSESessions[sessionID]
 	if ok {
-		session.filter = defaultLogFilter(session.level)
+			session.filter = normalizeLogFilter(session.filter, session.level)
 		logSSESessions[sessionID] = session
 	}
 	logSSEMu.Unlock()
 
 	if !ok {
-		Fail(c, 400, "会话不存在")
+		response.Fail(c, 400, "会话不存在")
 		return
 	}
 
 	logging.InfoPack("server.sse", "SSE filter reset: sessionId=%s", sessionID)
-	Success(c, gin.H{"config": session.filter})
+	response.Success(c, gin.H{"config": session.filter})
 }
 
 func removeLogSSESession(sessionID string) {

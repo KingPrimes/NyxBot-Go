@@ -1,3 +1,4 @@
+// Package main 服务入口，解析命令行参数后依次初始化日志、配置、数据库并启动 HTTP 服务。
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"nyxbot-go/internal/version"
 )
 
+// main 程序入口，支持 --version/--help 命令行参数。
 func main() {
 	if len(os.Args) > 1 {
 		switch strings.TrimSpace(os.Args[1]) {

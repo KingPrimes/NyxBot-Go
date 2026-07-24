@@ -1,3 +1,4 @@
+// Package auth 双令牌 JWT 实现（access 2h / refresh 7d），支持进程内黑名单吊销。
 package auth
 
 import (
@@ -18,25 +19,28 @@ const (
 )
 
 var (
-	ErrMissingToken      = errors.New("missing token")
-	ErrInvalidToken      = errors.New("invalid token")
-	ErrExpiredToken      = errors.New("expired token")
-	ErrUnsupportedToken  = errors.New("unsupported token")
-	ErrBlacklistedToken  = errors.New("blacklisted token")
+	ErrMissingToken      = errors.New("missing token")      // 缺少令牌
+	ErrInvalidToken      = errors.New("invalid token")      // 无效令牌
+	ErrExpiredToken      = errors.New("expired token")      // 令牌过期
+	ErrUnsupportedToken  = errors.New("unsupported token")  // 不支持的令牌类型
+	ErrBlacklistedToken  = errors.New("blacklisted token")  // 令牌已被吊销
 )
 
+// Claims JWT 载荷，包含用户 ID、用户名和令牌类型。
 type Claims struct {
 	UserID    uint   `json:"userId"`
 	UserName  string `json:"userName"`
-	TokenType string `json:"typ"`
+	TokenType string `json:"typ"` // access / refresh
 	jwt.RegisteredClaims
 }
 
+// TokenPair access token 和 refresh token 的配对。
 type TokenPair struct {
-	Token        string `json:"token"`
-	RefreshToken string `json:"refreshToken"`
+	Token        string `json:"token"`        // access token（2h 有效）
+	RefreshToken string `json:"refreshToken"` // refresh token（7d 有效）
 }
 
+// Manager JWT 管理器，负责生成、解析和吊销令牌。
 type Manager struct {
 	secret     []byte
 	accessTTL  time.Duration
@@ -46,6 +50,7 @@ type Manager struct {
 	blacklist   map[string]time.Time
 }
 
+// NewManager 创建 JWT 管理器，secret 为空时使用默认密钥。
 func NewManager(secret string) *Manager {
 	if strings.TrimSpace(secret) == "" {
 		secret = "nyxbot-secret-key"
@@ -59,6 +64,7 @@ func NewManager(secret string) *Manager {
 	}
 }
 
+// GeneratePair 生成 access + refresh 令牌对。
 func (m *Manager) GeneratePair(userID uint, userName string) (TokenPair, error) {
 	access, err := m.generate(userID, userName, TokenTypeAccess, m.accessTTL)
 	if err != nil {
@@ -73,10 +79,12 @@ func (m *Manager) GeneratePair(userID uint, userName string) (TokenPair, error) 
 	return TokenPair{Token: access, RefreshToken: refresh}, nil
 }
 
+// GenerateAccessToken 仅生成 access token。
 func (m *Manager) GenerateAccessToken(userID uint, userName string) (string, error) {
 	return m.generate(userID, userName, TokenTypeAccess, m.accessTTL)
 }
 
+// ParseAccessToken 解析并验证 access token（含过期检查）。
 func (m *Manager) ParseAccessToken(raw string) (*Claims, error) {
 	claims, err := m.parse(raw, false)
 	if err != nil {
@@ -89,6 +97,7 @@ func (m *Manager) ParseAccessToken(raw string) (*Claims, error) {
 	return claims, nil
 }
 
+// ParseAccessTokenAllowExpired 解析 access token，允许令牌已过期（用于 refresh 场景）。
 func (m *Manager) ParseAccessTokenAllowExpired(raw string) (*Claims, error) {
 	claims, err := m.parse(raw, true)
 	if err != nil {
@@ -101,6 +110,7 @@ func (m *Manager) ParseAccessTokenAllowExpired(raw string) (*Claims, error) {
 	return claims, nil
 }
 
+// Blacklist 将令牌加入黑名单，到期后自动清理。
 func (m *Manager) Blacklist(raw string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -118,6 +128,7 @@ func (m *Manager) Blacklist(raw string) {
 	m.cleanupBlacklistLocked(time.Now())
 }
 
+// IsBlacklisted 检查令牌是否在黑名单中。
 func (m *Manager) IsBlacklisted(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -205,6 +216,7 @@ func randomJTI() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// BearerToken 从 Authorization 请求头中提取 Bearer token。
 func BearerToken(header string) string {
 	header = strings.TrimSpace(header)
 	if header == "" {

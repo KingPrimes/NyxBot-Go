@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"nyxbot-go/internal/logging"
+	"nyxbot-go/internal/response"
 )
 
 // CORS 跨域中间件
@@ -34,7 +35,7 @@ func Recovery() gin.HandlerFunc {
 		defer func() {
 			if err := recover(); err != nil {
 				logging.PanicPack("server.recovery", "%v", err)
-				c.JSON(http.StatusInternalServerError, Response{
+				c.JSON(http.StatusInternalServerError, response.Response{
 					Code: 500,
 					Msg:  "服务器内部错误",
 					Data: nil,
