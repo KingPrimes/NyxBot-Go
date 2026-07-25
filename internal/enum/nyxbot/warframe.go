@@ -5,33 +5,33 @@ package nyxbot
 type MissionType string
 
 const (
-	MTExtermination    MissionType = "MT_EXTERMINATION"
-	MTSurvival         MissionType = "MT_SURVIVAL"
-	MTRescue           MissionType = "MT_RESCUE"
-	MTSabotage         MissionType = "MT_SABOTAGE"
-	MTCapture          MissionType = "MT_CAPTURE"
-	MTIntel            MissionType = "MT_INTEL"
-	MTDefense          MissionType = "MT_DEFENSE"
-	MTMobileDefense    MissionType = "MT_MOBILE_DEFENSE"
-	MTTerritory        MissionType = "MT_TERRITORY"
-	MTHive             MissionType = "MT_HIVE"
-	MTRetrieval        MissionType = "MT_RETRIEVAL"
-	MTExcavate         MissionType = "MT_EXCAVATE"
-	MTSalvage          MissionType = "MT_SALVAGE"
-	MTPursuit          MissionType = "MT_PURSUIT"
-	MTAssault          MissionType = "MT_ASSAULT"
-	MTEvacuation       MissionType = "MT_EVACUATION"
-	MTDisruption       MissionType = "MT_DISRUPTION"
-	MTVoidFlood        MissionType = "MT_VOID_FLOOD"
-	MTVoidCascade      MissionType = "MT_VOID_CASCADE"
-	MTVoidArmageddon   MissionType = "MT_VOID_ARMAGEDDON"
-	MTAlchemy          MissionType = "MT_ALCHEMY"
-	MTCambire          MissionType = "MT_CAMBIRE"
-	MTSkirmish         MissionType = "MT_SKIRMISH"
-	MTVolatile         MissionType = "MT_VOLATILE"
-	MTOrpheus          MissionType = "MT_ORPHEUS"
-	MTAscension        MissionType = "MT_ASCENSION"
-	MTCorruption       MissionType = "MT_CORRUPTION"
+	MTExtermination  MissionType = "MT_EXTERMINATION"
+	MTSurvival       MissionType = "MT_SURVIVAL"
+	MTRescue         MissionType = "MT_RESCUE"
+	MTSabotage       MissionType = "MT_SABOTAGE"
+	MTCapture        MissionType = "MT_CAPTURE"
+	MTIntel          MissionType = "MT_INTEL"
+	MTDefense        MissionType = "MT_DEFENSE"
+	MTMobileDefense  MissionType = "MT_MOBILE_DEFENSE"
+	MTTerritory      MissionType = "MT_TERRITORY"
+	MTHive           MissionType = "MT_HIVE"
+	MTRetrieval      MissionType = "MT_RETRIEVAL"
+	MTExcavate       MissionType = "MT_EXCAVATE"
+	MTSalvage        MissionType = "MT_SALVAGE"
+	MTPursuit        MissionType = "MT_PURSUIT"
+	MTAssault        MissionType = "MT_ASSAULT"
+	MTEvacuation     MissionType = "MT_EVACUATION"
+	MTDisruption     MissionType = "MT_DISRUPTION"
+	MTVoidFlood      MissionType = "MT_VOID_FLOOD"
+	MTVoidCascade    MissionType = "MT_VOID_CASCADE"
+	MTVoidArmageddon MissionType = "MT_VOID_ARMAGEDDON"
+	MTAlchemy        MissionType = "MT_ALCHEMY"
+	MTCambire        MissionType = "MT_CAMBIRE"
+	MTSkirmish       MissionType = "MT_SKIRMISH"
+	MTVolatile       MissionType = "MT_VOLATILE"
+	MTOrpheus        MissionType = "MT_ORPHEUS"
+	MTAscension      MissionType = "MT_ASCENSION"
+	MTCorruption     MissionType = "MT_CORRUPTION"
 )
 
 // Name 返回任务类型的中文名称。
@@ -55,20 +55,20 @@ func (m MissionType) Name() string {
 type SubscribeType string
 
 const (
-	SubAlerts       SubscribeType = "ALERTS"
-	SubArbitration  SubscribeType = "ARBITRATION"
-	SubCetusCycle   SubscribeType = "CETUS_CYCLE"
-	SubDailyDeals   SubscribeType = "DAILY_DEALS"
-	SubEvents       SubscribeType = "EVENTS"
-	SubInvasions    SubscribeType = "INVASIONS"
-	SubSteelPath    SubscribeType = "STEEL_PATH"
-	SubVoid         SubscribeType = "VOID"
-	SubFissures     SubscribeType = "FISSURES"
-	SubNews         SubscribeType = "NEWS"
-	SubNightwave    SubscribeType = "NIGHTWAVE"
-	SubSortie       SubscribeType = "SORTIE"
-	SubArchonHunt   SubscribeType = "ARCHON_HUNT"
-	SubDuviriCycle  SubscribeType = "DUVIRI_CYCLE"
+	SubAlerts      SubscribeType = "ALERTS"
+	SubArbitration SubscribeType = "ARBITRATION"
+	SubCetusCycle  SubscribeType = "CETUS_CYCLE"
+	SubDailyDeals  SubscribeType = "DAILY_DEALS"
+	SubEvents      SubscribeType = "EVENTS"
+	SubInvasions   SubscribeType = "INVASIONS"
+	SubSteelPath   SubscribeType = "STEEL_PATH"
+	SubVoid        SubscribeType = "VOID"
+	SubFissures    SubscribeType = "FISSURES"
+	SubNews        SubscribeType = "NEWS"
+	SubNightwave   SubscribeType = "NIGHTWAVE"
+	SubSortie      SubscribeType = "SORTIE"
+	SubArchonHunt  SubscribeType = "ARCHON_HUNT"
+	SubDuviriCycle SubscribeType = "DUVIRI_CYCLE"
 )
 
 // Name 返回订阅类型的中文名称。
@@ -87,8 +87,8 @@ func (s SubscribeType) Name() string {
 type FissureTypeEnum string
 
 const (
-	FissureSteelPath   FissureTypeEnum = "STEEL_PATH"
-	FissureVoidStorms  FissureTypeEnum = "VOID_STORMS"
+	FissureSteelPath     FissureTypeEnum = "STEEL_PATH"
+	FissureVoidStorms    FissureTypeEnum = "VOID_STORMS"
 	FissureActiveMission FissureTypeEnum = "ACTIVE_MISSION"
 )
 
@@ -96,27 +96,27 @@ const (
 type InvasionReward string
 
 const (
-	InvRewardNone           InvasionReward = "NONE"
+	InvRewardNone             InvasionReward = "NONE"
 	InvRewardDetoniteInjector InvasionReward = "DETONITE_INJECTOR"
-	InvRewardFieldron        InvasionReward = "FIELDRON"
-	InvRewardMutagenMass     InvasionReward = "MUTAGEN_MASS"
-	InvRewardOrokinCatalyst InvasionReward = "OROKIN_CATALYST"
-	InvRewardOrokinReactor  InvasionReward = "OROKIN_REACTOR"
-	InvRewardForma          InvasionReward = "FORMA"
-	InvRewardExilusAdapter  InvasionReward = "EXILUS_ADAPTER"
+	InvRewardFieldron         InvasionReward = "FIELDRON"
+	InvRewardMutagenMass      InvasionReward = "MUTAGEN_MASS"
+	InvRewardOrokinCatalyst   InvasionReward = "OROKIN_CATALYST"
+	InvRewardOrokinReactor    InvasionReward = "OROKIN_REACTOR"
+	InvRewardForma            InvasionReward = "FORMA"
+	InvRewardExilusAdapter    InvasionReward = "EXILUS_ADAPTER"
 )
 
 // Name 返回入侵特殊奖励的中文名称。
 func (i InvasionReward) Name() string {
 	mp := map[InvasionReward]string{
-		InvRewardNone:            "无",
+		InvRewardNone:             "无",
 		InvRewardDetoniteInjector: "突变原聚合物",
 		InvRewardFieldron:         "力场装置样本",
 		InvRewardMutagenMass:      "突变原聚合物",
 		InvRewardOrokinCatalyst:   "金土豆",
 		InvRewardOrokinReactor:    "银土豆",
-		InvRewardForma:           "Forma",
-		InvRewardExilusAdapter:   "Exilus 槽位适配器",
+		InvRewardForma:            "Forma",
+		InvRewardExilusAdapter:    "Exilus 槽位适配器",
 	}
 	return mp[i]
 }
@@ -125,11 +125,11 @@ func (i InvasionReward) Name() string {
 type RivenTrendType string
 
 const (
-	RivenTrendRifle    RivenTrendType = "RIFLE"
-	RivenTrendShotgun  RivenTrendType = "SHOTGUN"
-	RivenTrendPistol   RivenTrendType = "PISTOL"
-	RivenTrendArchgun  RivenTrendType = "ARCHGUN"
-	RivenTrendMelee    RivenTrendType = "MELEE"
+	RivenTrendRifle   RivenTrendType = "RIFLE"
+	RivenTrendShotgun RivenTrendType = "SHOTGUN"
+	RivenTrendPistol  RivenTrendType = "PISTOL"
+	RivenTrendArchgun RivenTrendType = "ARCHGUN"
+	RivenTrendMelee   RivenTrendType = "MELEE"
 )
 
 // Desc 返回紫卡倾向武器类型的中文描述。

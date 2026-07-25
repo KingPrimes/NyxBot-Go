@@ -3,10 +3,10 @@
 package version
 
 var (
-	Version     = "dev"     // 语义化版本号
-	ProductName = "NyxBot"  // 产品名称
+	Version     = "dev"           // 语义化版本号
+	ProductName = "NyxBot"        // 产品名称
 	Description = "NyxBot Server" // 产品描述
-	Commit      = "unknown" // Git commit hash
+	Commit      = "unknown"       // Git commit hash
 )
 
 // String 返回版本号字符串。

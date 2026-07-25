@@ -90,16 +90,16 @@ func (b BusinessType) Type() string {
 type LogTitleEnum string
 
 const (
-	LogTitleOther     LogTitleEnum = "OTHER"
-	LogTitlePlugin    LogTitleEnum = "PLUGIN"
+	LogTitleOther      LogTitleEnum = "OTHER"
+	LogTitlePlugin     LogTitleEnum = "PLUGIN"
 	LogTitleController LogTitleEnum = "CONTROLLER"
 )
 
 // Title 返回日志标题枚举的中文名。
 func (l LogTitleEnum) Title() string {
 	m := map[LogTitleEnum]string{
-		LogTitleOther:     "其它",
-		LogTitlePlugin:    "插件",
+		LogTitleOther:      "其它",
+		LogTitlePlugin:     "插件",
 		LogTitleController: "控制器",
 	}
 	return m[l]

@@ -32,7 +32,8 @@ func main() {
 	}
 
 	logging.Init(logging.Config{})
-	cfg := config.Load()
+	rt := config.NewRuntime(config.Load(), "config.yaml")
+	cfg := rt.Config()
 	logging.Init(logging.Config{
 		Dir:            cfg.Log.Dir,
 		MaxFileSize:    int64(cfg.Log.MaxFileSizeMB) * 1024 * 1024,
@@ -42,7 +43,7 @@ func main() {
 	})
 	database.Init(cfg.Database.Path, cfg.Log.Startup)
 
-	r := server.NewRouter(cfg)
+	r := server.NewRouter(rt)
 	if err := r.Run(cfg.Addr()); err != nil {
 		logging.ErrorPack("main", "server stopped: %v", err)
 	}

@@ -4,8 +4,8 @@ package nyxbot
 type AsyncBeanName string
 
 const (
-	AsyncMyAsync AsyncBeanName = "MYASYNC"
-	AsyncService AsyncBeanName = "SERVICE"
+	AsyncMyAsync  AsyncBeanName = "MYASYNC"
+	AsyncService  AsyncBeanName = "SERVICE"
 	AsyncInitData AsyncBeanName = "InitData"
 )
 
@@ -61,14 +61,14 @@ func (s SearchType) Type() string {
 type SearchElement string
 
 const (
-	SearchElemCold       SearchElement = "COLD"
-	SearchElemRadiation  SearchElement = "RADIATION"
-	SearchElemHeat       SearchElement = "HEAT"
-	SearchElemMagnetic   SearchElement = "MAGNETIC"
-	SearchElemToxin      SearchElement = "TOXIN"
+	SearchElemCold        SearchElement = "COLD"
+	SearchElemRadiation   SearchElement = "RADIATION"
+	SearchElemHeat        SearchElement = "HEAT"
+	SearchElemMagnetic    SearchElement = "MAGNETIC"
+	SearchElemToxin       SearchElement = "TOXIN"
 	SearchElemElectricity SearchElement = "ELECTRICITY"
-	SearchElemImpact     SearchElement = "IMPACT"
-	SearchElemAny        SearchElement = "ANY"
+	SearchElemImpact      SearchElement = "IMPACT"
+	SearchElemAny         SearchElement = "ANY"
 )
 
 // DucatsType 杜卡德币统计类型
@@ -83,15 +83,15 @@ const (
 type ProductCategory string
 
 const (
-	ProductPistols          ProductCategory = "Pistols"
-	ProductLongGuns         ProductCategory = "LongGuns"
-	ProductMelee            ProductCategory = "Melee"
-	ProductSpaceGuns        ProductCategory = "SpaceGuns"
-	ProductSpaceMelee       ProductCategory = "SpaceMelee"
-	ProductSpecialItems     ProductCategory = "SpecialItems"
-	ProductCrewShipWeapons  ProductCategory = "CrewShipWeapons"
-	ProductSentinelWeapons  ProductCategory = "SentinelWeapons"
-	ProductShotguns         ProductCategory = "Shotguns"
+	ProductPistols         ProductCategory = "Pistols"
+	ProductLongGuns        ProductCategory = "LongGuns"
+	ProductMelee           ProductCategory = "Melee"
+	ProductSpaceGuns       ProductCategory = "SpaceGuns"
+	ProductSpaceMelee      ProductCategory = "SpaceMelee"
+	ProductSpecialItems    ProductCategory = "SpecialItems"
+	ProductCrewShipWeapons ProductCategory = "CrewShipWeapons"
+	ProductSentinelWeapons ProductCategory = "SentinelWeapons"
+	ProductShotguns        ProductCategory = "Shotguns"
 )
 
 // Name 返回产品分类的中文名称。

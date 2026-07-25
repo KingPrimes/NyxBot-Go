@@ -27,8 +27,8 @@ type DuvalierChoice struct {
 }
 
 const (
-	duvalierCycleTime  int64 = 36000 // 总周期时长（秒）
-	duvalierStateTime  int64 = 7200  // 每个阶段持续时间（秒）
+	duvalierCycleTime int64 = 36000 // 总周期时长（秒）
+	duvalierStateTime int64 = 7200  // 每个阶段持续时间（秒）
 )
 
 var duvalierStates = []string{"悲伤", "恐惧", "喜悦", "愤怒", "嫉妒"}

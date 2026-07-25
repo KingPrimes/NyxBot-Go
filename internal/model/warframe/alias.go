@@ -4,9 +4,9 @@ package warframe
 
 type Alias struct {
 	ID          uint   `gorm:"primaryKey"`          // 主键
-	Alias       string `gorm:"column:alias"`         // 别名（输入用）
-	ChineseName string `gorm:"column:chinese_name"`  // 对应的中文名称
-	Message     string `gorm:"column:message"`       // 关联的回复消息
+	Alias       string `gorm:"column:alias"`        // 别名（输入用）
+	ChineseName string `gorm:"column:chinese_name"` // 对应的中文名称
+	Message     string `gorm:"column:message"`      // 关联的回复消息
 }
 
 func (Alias) TableName() string {

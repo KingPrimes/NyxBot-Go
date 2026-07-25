@@ -18,7 +18,13 @@ log:
   history_size: 50
 
 bot:
-  ws_url: "/ws/shiro"
+  mode: "server"
+  ws_server_path: "/ws/shiro"
+  ws_client_url: "ws://localhost:3001"
+  access_token: ""
+  wait_n: 16
+  plugin_prefix: false
+  plugin_name: ""
 
 auth:
   jwt_secret: "nyxbot-secret-key"

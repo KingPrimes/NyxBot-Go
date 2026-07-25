@@ -4,8 +4,8 @@
 package bot
 
 type GroupBlack struct {
-	ID      uint  `gorm:"primaryKey"`          // 主键
-	BotUID  int64 `gorm:"column:bot_uid"`      // 机器人 QQ
+	ID       uint  `gorm:"primaryKey"`                   // 主键
+	BotUID   int64 `gorm:"column:bot_uid"`               // 机器人 QQ
 	GroupUID int64 `gorm:"column:group_uid;uniqueIndex"` // 黑名单群号（唯一）
 }
 
@@ -14,8 +14,8 @@ func (GroupBlack) TableName() string {
 }
 
 type ProveBlack struct {
-	ID       uint  `gorm:"primaryKey"`          // 主键
-	BotUID   int64 `gorm:"column:bot_uid"`      // 机器人 QQ
+	ID       uint  `gorm:"primaryKey"`                   // 主键
+	BotUID   int64 `gorm:"column:bot_uid"`               // 机器人 QQ
 	ProveUID int64 `gorm:"column:prove_uid;uniqueIndex"` // 黑名单用户 QQ（唯一）
 }
 

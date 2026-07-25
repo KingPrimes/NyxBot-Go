@@ -4,9 +4,9 @@ package warframe
 
 type StateTranslation struct {
 	ID          uint   `gorm:"primaryKey"`          // 主键
-	State       string `gorm:"column:state"`         // 原始状态名（英文）
-	ChineseName string `gorm:"column:chinese_name"`  // 中文翻译
-	Description string `gorm:"column:description"`   // 状态描述说明
+	State       string `gorm:"column:state"`        // 原始状态名（英文）
+	ChineseName string `gorm:"column:chinese_name"` // 中文翻译
+	Description string `gorm:"column:description"`  // 状态描述说明
 }
 
 func (StateTranslation) TableName() string {

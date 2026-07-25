@@ -10,18 +10,18 @@ import (
 )
 
 type CetusCycle struct {
-	IsDay    bool   `json:"isDay"`    // 是否为白昼
-	Expiry   string `json:"expiry"`   // 当前状态结束时间
+	IsDay      bool   `json:"isDay"`      // 是否为白昼
+	Expiry     string `json:"expiry"`     // 当前状态结束时间
 	Activation string `json:"activation"` // 当前状态开始时间
-	State    string `json:"state"`    // 状态（白昼/夜晚）
-	Cycle    string `json:"cycle"`    // 状态英文（day/night）
-	TimeLeft string `json:"timeLeft"` // 剩余时间
+	State      string `json:"state"`      // 状态（白昼/夜晚）
+	Cycle      string `json:"cycle"`      // 状态英文（day/night）
+	TimeLeft   string `json:"timeLeft"`   // 剩余时间
 }
 
 const (
-	cetusNightTime     = 3000               // 夜晚持续时间（秒）
-	cetusDayMax  int64 = 6000000            // 白天最大持续时间（毫秒）
-	cetusNightMax int64 = 3000000           // 夜晚最大持续时间（毫秒）
+	cetusNightTime       = 3000    // 夜晚持续时间（秒）
+	cetusDayMax    int64 = 6000000 // 白天最大持续时间（毫秒）
+	cetusNightMax  int64 = 3000000 // 夜晚最大持续时间（毫秒）
 )
 
 // ComputeCetusCycle 计算夜灵平原循环

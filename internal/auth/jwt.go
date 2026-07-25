@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"nyxbot-go/internal/logging"
 )
 
 const (
@@ -19,11 +20,11 @@ const (
 )
 
 var (
-	ErrMissingToken      = errors.New("missing token")      // 缺少令牌
-	ErrInvalidToken      = errors.New("invalid token")      // 无效令牌
-	ErrExpiredToken      = errors.New("expired token")      // 令牌过期
-	ErrUnsupportedToken  = errors.New("unsupported token")  // 不支持的令牌类型
-	ErrBlacklistedToken  = errors.New("blacklisted token")  // 令牌已被吊销
+	ErrMissingToken     = errors.New("missing token")     // 缺少令牌
+	ErrInvalidToken     = errors.New("invalid token")     // 无效令牌
+	ErrExpiredToken     = errors.New("expired token")     // 令牌过期
+	ErrUnsupportedToken = errors.New("unsupported token") // 不支持的令牌类型
+	ErrBlacklistedToken = errors.New("blacklisted token") // 令牌已被吊销
 )
 
 // Claims JWT 载荷，包含用户 ID、用户名和令牌类型。
@@ -50,10 +51,15 @@ type Manager struct {
 	blacklist   map[string]time.Time
 }
 
-// NewManager 创建 JWT 管理器，secret 为空时使用默认密钥。
+// NewManager 创建 JWT 管理器。
+// 配置层已保证密钥非空；secret 为空时退化为随机生成的内存密钥（不落盘，
+// 重启后旧 token 失效），不回退到硬编码默认密钥。
 func NewManager(secret string) *Manager {
 	if strings.TrimSpace(secret) == "" {
-		secret = "nyxbot-secret-key"
+		b := make([]byte, 32)
+		_, _ = rand.Read(b) // Go 1.24 起 crypto/rand.Read 保证不会失败
+		secret = hex.EncodeToString(b)
+		logging.WarnPack("auth", "jwt secret is empty, random in-memory secret generated; set jwt_secret in config file to keep tokens valid after restart")
 	}
 
 	return &Manager{

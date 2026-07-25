@@ -27,7 +27,7 @@ type logFilterConfig struct {
 	IncludePackages []string `json:"includePackages"`
 	ExcludePackages []string `json:"excludePackages"`
 	IncludeThreads  []string `json:"includeThreads"`
-	UseRegex         bool     `json:"useRegex"`
+	UseRegex        bool     `json:"useRegex"`
 }
 
 type logSSEData struct {
@@ -97,9 +97,9 @@ func logSSEStats(c *gin.Context) {
 	logSSEMu.RUnlock()
 
 	response.Success(c, gin.H{
-		"connections": connections,
+		"connections":       connections,
 		"activeConnections": connections,
-		"protocol": "SSE (Server-Sent Events)",
+		"protocol":          "SSE (Server-Sent Events)",
 	})
 }
 
@@ -119,7 +119,7 @@ func updateLogSSEFilter(c *gin.Context) {
 	logSSEMu.Lock()
 	session, ok := logSSESessions[sessionID]
 	if ok {
-			session.filter = normalizeLogFilter(filter, session.level)
+		session.filter = normalizeLogFilter(filter, session.level)
 		logSSESessions[sessionID] = session
 	}
 	logSSEMu.Unlock()
@@ -143,7 +143,7 @@ func resetLogSSEFilter(c *gin.Context) {
 	logSSEMu.Lock()
 	session, ok := logSSESessions[sessionID]
 	if ok {
-			session.filter = normalizeLogFilter(session.filter, session.level)
+		session.filter = normalizeLogFilter(session.filter, session.level)
 		logSSESessions[sessionID] = session
 	}
 	logSSEMu.Unlock()

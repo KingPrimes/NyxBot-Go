@@ -9,23 +9,23 @@ type SyndicateInfo struct {
 type Syndicate string
 
 const (
-	SyndArbiters       Syndicate = "ArbitersSyndicate"
-	SyndCephalonSuda   Syndicate = "CephalonSudaSyndicate"
-	SyndNewLoka        Syndicate = "NewLokaSyndicate"
-	SyndPerrin         Syndicate = "PerrinSyndicate"
-	SyndSteelMeridian  Syndicate = "SteelMeridianSyndicate"
-	SyndRedVeil        Syndicate = "RedVeilSyndicate"
-	SyndCetus          Syndicate = "CetusSyndicate"
-	SyndQuills         Syndicate = "QuillsSyndicate"
-	SyndSolaris        Syndicate = "SolarisSyndicate"
-	SyndVox            Syndicate = "VoxSyndicate"
-	SyndVentKids       Syndicate = "VentKidsSyndicate"
-	SyndEntrati        Syndicate = "EntratiSyndicate"
-	SyndEntratiLab     Syndicate = "EntratiLabSyndicate"
-	SyndHex            Syndicate = "HexSyndicate"
-	SyndNecraloid      Syndicate = "NecraloidSyndicate"
-	SyndKahl           Syndicate = "KahlSyndicate"
-	SyndZariman        Syndicate = "ZarimanSyndicate"
+	SyndArbiters      Syndicate = "ArbitersSyndicate"
+	SyndCephalonSuda  Syndicate = "CephalonSudaSyndicate"
+	SyndNewLoka       Syndicate = "NewLokaSyndicate"
+	SyndPerrin        Syndicate = "PerrinSyndicate"
+	SyndSteelMeridian Syndicate = "SteelMeridianSyndicate"
+	SyndRedVeil       Syndicate = "RedVeilSyndicate"
+	SyndCetus         Syndicate = "CetusSyndicate"
+	SyndQuills        Syndicate = "QuillsSyndicate"
+	SyndSolaris       Syndicate = "SolarisSyndicate"
+	SyndVox           Syndicate = "VoxSyndicate"
+	SyndVentKids      Syndicate = "VentKidsSyndicate"
+	SyndEntrati       Syndicate = "EntratiSyndicate"
+	SyndEntratiLab    Syndicate = "EntratiLabSyndicate"
+	SyndHex           Syndicate = "HexSyndicate"
+	SyndNecraloid     Syndicate = "NecraloidSyndicate"
+	SyndKahl          Syndicate = "KahlSyndicate"
+	SyndZariman       Syndicate = "ZarimanSyndicate"
 )
 
 var SyndicateMap = map[Syndicate]SyndicateInfo{
@@ -90,9 +90,9 @@ var PolarityIconMap = map[Polarity]string{
 type Rarity string
 
 const (
-	RarityCommon   Rarity = "COMMON"
-	RarityUncommon Rarity = "UNCOMMON"
-	RarityRare     Rarity = "RARE"
+	RarityCommon    Rarity = "COMMON"
+	RarityUncommon  Rarity = "UNCOMMON"
+	RarityRare      Rarity = "RARE"
 	RarityLegendary Rarity = "LEGENDARY"
 )
 
@@ -132,7 +132,7 @@ const (
 	IconCredits  Icon = "CREDITS"
 	IconAyan     Icon = "AYAN"
 	IconPlatinum Icon = "PLATINUM"
-	IconRefresh   Icon = "REFRESH"
+	IconRefresh  Icon = "REFRESH"
 	IconCold     Icon = "COLD"
 	IconSun      Icon = "SUN"
 	IconNight    Icon = "NIGHT"

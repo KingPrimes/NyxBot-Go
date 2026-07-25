@@ -3,10 +3,10 @@
 package warframe
 
 type Ephemera struct {
-	ID       uint   `gorm:"primaryKey"`          // 主键
-	URL      string `gorm:"column:url"`           // 物品详情链接
-	ItemName string `gorm:"column:item_name"`     // 幻纹名称
-	Thumb    string `gorm:"column:thumb"`         // 缩略图链接
+	ID       uint   `gorm:"primaryKey"`       // 主键
+	URL      string `gorm:"column:url"`       // 物品详情链接
+	ItemName string `gorm:"column:item_name"` // 幻纹名称
+	Thumb    string `gorm:"column:thumb"`     // 缩略图链接
 }
 
 func (Ephemera) TableName() string {

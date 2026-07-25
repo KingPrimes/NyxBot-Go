@@ -11,8 +11,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"nyxbot-go/internal/model/bot"
 	"nyxbot-go/internal/logging"
+	"nyxbot-go/internal/model/bot"
 	"nyxbot-go/internal/model/plugin"
 	"nyxbot-go/internal/model/system"
 	"nyxbot-go/internal/model/warframe"

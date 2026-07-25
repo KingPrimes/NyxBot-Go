@@ -41,14 +41,14 @@ func (m MarketSearchPolicy) Value() string {
 type MarketSearchElement string
 
 const (
-	MarketElemCold       MarketSearchElement = "COLD"
-	MarketElemRadiation  MarketSearchElement = "RADIATION"
-	MarketElemHeat       MarketSearchElement = "HEAT"
-	MarketElemMagnetic   MarketSearchElement = "MAGNETIC"
-	MarketElemToxin      MarketSearchElement = "TOXIN"
+	MarketElemCold        MarketSearchElement = "COLD"
+	MarketElemRadiation   MarketSearchElement = "RADIATION"
+	MarketElemHeat        MarketSearchElement = "HEAT"
+	MarketElemMagnetic    MarketSearchElement = "MAGNETIC"
+	MarketElemToxin       MarketSearchElement = "TOXIN"
 	MarketElemElectricity MarketSearchElement = "ELECTRICITY"
-	MarketElemImpact     MarketSearchElement = "IMPACT"
-	MarketElemAny        MarketSearchElement = "ANY"
+	MarketElemImpact      MarketSearchElement = "IMPACT"
+	MarketElemAny         MarketSearchElement = "ANY"
 )
 
 // Element 返回元素类型的小写 API 参数。

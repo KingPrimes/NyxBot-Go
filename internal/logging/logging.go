@@ -32,8 +32,8 @@ const (
 type Entry struct {
 	Time    time.Time `json:"time"`
 	Level   Level     `json:"level"`
-	Pack    string    `json:"pack"`    // 来源包名
-	Thread  string    `json:"thread"`  // goroutine ID
+	Pack    string    `json:"pack"`   // 来源包名
+	Thread  string    `json:"thread"` // goroutine ID
 	Message string    `json:"message"`
 	Fields  string    `json:"fields,omitempty"` // 扩展字段
 }

@@ -50,16 +50,16 @@ type CambionCycle struct {
 
 type Sortie struct {
 	WorldStateBase
-	Faction  string         `json:"faction"`  // 敌对派系
-	Boss     string         `json:"boss"`     // 头目名称
+	Faction  string          `json:"faction"`  // 敌对派系
+	Boss     string          `json:"boss"`     // 头目名称
 	Variants []SortieVariant `json:"variants"` // 阶段列表
-	Reward   []SortieReward `json:"reward"`   // 奖励列表
+	Reward   []SortieReward  `json:"reward"`   // 奖励列表
 }
 
 type SortieVariant struct {
-	Node        string `json:"node"`            // 节点名称
-	MissionType string `json:"missionType"`     // 任务类型
-	Modifier    string `json:"modifier"`        // modifier 类型
+	Node         string `json:"node"`                // 节点名称
+	MissionType  string `json:"missionType"`         // 任务类型
+	Modifier     string `json:"modifier"`            // modifier 类型
 	ModifierDesc string `json:"modifierDescription"` // modifier 描述
 }
 
@@ -84,13 +84,13 @@ type Invasion struct {
 	Faction        string          `json:"faction"`        // 星球派系
 	Attacker       string          `json:"attacker"`       // 攻击方
 	Defender       string          `json:"defender"`       // 防守方
-	AttackerReward  *InvasionReward `json:"attackerReward"` // 攻击方奖励
-	DefenderReward  *InvasionReward `json:"defenderReward"` // 防守方奖励
-	Count           int            `json:"count"`           // 当前进度
-	RequiredCount   int            `json:"requiredCount"`   // 所需进度
-	Completion      float64        `json:"completion"`      // 完成百分比
+	AttackerReward *InvasionReward `json:"attackerReward"` // 攻击方奖励
+	DefenderReward *InvasionReward `json:"defenderReward"` // 防守方奖励
+	Count          int             `json:"count"`          // 当前进度
+	RequiredCount  int             `json:"requiredCount"`  // 所需进度
+	Completion     float64         `json:"completion"`     // 完成百分比
 	VS             string          `json:"vs"`             // 对抗文字（攻 vs 守）
-	Eta             string          `json:"eta"`            // 剩余时间
+	Eta            string          `json:"eta"`            // 剩余时间
 }
 
 type InvasionReward struct {
@@ -103,21 +103,21 @@ type InvasionReward struct {
 
 type Event struct {
 	WorldStateBase
-	Description   string       `json:"description"`   // 描述
-	Tooltip       string       `json:"tooltip"`       // 提示文字
-	Node          string       `json:"node"`          // 节点
-	MaximumScore  int          `json:"maximumScore"`  // 最高分数
-	CurrentScore  int          `json:"currentScore"`  // 当前分数
-	Health        int          `json:"health"`        // 生命值
+	Description   string       `json:"description"`    // 描述
+	Tooltip       string       `json:"tooltip"`        // 提示文字
+	Node          string       `json:"node"`           // 节点
+	MaximumScore  int          `json:"maximumScore"`   // 最高分数
+	CurrentScore  int          `json:"currentScore"`   // 当前分数
+	Health        int          `json:"health"`         // 生命值
 	Reward        *EventReward `json:"rewards"`        // 最终奖励
-	InterimGoal   int          `json:"interimGoals"`  // 阶段性目标
-	IsPersonal    bool         `json:"isPersonal"`    // 是否为个人活动
+	InterimGoal   int          `json:"interimGoals"`   // 阶段性目标
+	IsPersonal    bool         `json:"isPersonal"`     // 是否为个人活动
 	InterimReward *EventReward `json:"interimRewards"` // 阶段性奖励
 }
 
 type EventReward struct {
-	Credits int              `json:"credits"` // 星币
-	Items   []EventRewardItem `json:"items"`  // 物品列表
+	Credits int               `json:"credits"` // 星币
+	Items   []EventRewardItem `json:"items"`   // 物品列表
 }
 
 type EventRewardItem struct {
@@ -128,10 +128,10 @@ type EventRewardItem struct {
 
 type VoidTrader struct {
 	WorldStateBase
-	Character  string          `json:"character"`  // 商人名称
-	Location   string          `json:"location"`   // 所在中继站
-	Inventory  []VoidTraderItem `json:"inventory"`  // 商品列表
-	IsBaro     bool            `json:"isBaro"`     // 是否 Baro
+	Character string           `json:"character"` // 商人名称
+	Location  string           `json:"location"`  // 所在中继站
+	Inventory []VoidTraderItem `json:"inventory"` // 商品列表
+	IsBaro    bool             `json:"isBaro"`    // 是否 Baro
 }
 
 type VoidTraderItem struct {
@@ -169,11 +169,11 @@ type Progress struct {
 
 type Arbitration struct {
 	WorldStateBase
-	Node      string `json:"node"`      // 节点
-	Enemy     string `json:"enemy"`     // 敌人派系
-	EnemyLv   int    `json:"enemyLv"`   // 敌人等级
-	Type      string `json:"type"`      // 任务类型
-	IsArchon  bool   `json:"isArchon"`  // 是否执刑官猎
+	Node     string `json:"node"`     // 节点
+	Enemy    string `json:"enemy"`    // 敌人派系
+	EnemyLv  int    `json:"enemyLv"`  // 敌人等级
+	Type     string `json:"type"`     // 任务类型
+	IsArchon bool   `json:"isArchon"` // 是否执刑官猎
 }
 
 type ArchonHunt struct {

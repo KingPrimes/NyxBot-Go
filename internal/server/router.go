@@ -7,11 +7,13 @@ import (
 	"nyxbot-go/internal/config"
 	"nyxbot-go/internal/logging"
 	"nyxbot-go/internal/response"
+	"nyxbot-go/internal/system"
 	"nyxbot-go/internal/web"
 )
 
-// NewRouter 创建并配置 Gin Engine，注册认证路由、API 路由和静态文件托管。
-func NewRouter(cfg config.Config) *gin.Engine {
+// NewRouter 创建并配置 Gin Engine，注册认证路由、系统配置路由、API 路由和静态文件托管。
+func NewRouter(rt *config.Runtime) *gin.Engine {
+	cfg := rt.Config()
 	gin.SetMode(cfg.Server.GinMode)
 	gin.DebugPrintRouteFunc = func(httpMethod, absolutePath, handlerName string, nuHandlers int) {
 		logging.DebugPack("server.router", "ROUTE %s %s %s %d", httpMethod, absolutePath, handlerName, nuHandlers)
@@ -31,8 +33,9 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	authMiddleware := auth.NewMiddleware(tokenManager)
 
 	registerAuthRoutes(r, authHandler, authMiddleware)
+	registerConfigRoutes(r, authMiddleware, rt)
 	registerAPIRoutes(r)
-	web.RegisterStaticRoutes(r, cfg.Server.StaticDir)
+	web.RegisterStaticRoutes(r)
 
 	return r
 }
@@ -49,6 +52,18 @@ func registerAuthRoutes(r *gin.Engine, h *auth.Handler, mw *auth.Middleware) {
 		authGroup.POST("/restorePassword", h.RestorePassword)
 		authGroup.POST("/changeUsername", h.ChangeUsername)
 		authGroup.POST("/logout", h.Logout)
+	}
+}
+
+// registerConfigRoutes 注册 /config/* 系统配置路由，全部要求有效 access token。
+func registerConfigRoutes(r *gin.Engine, mw *auth.Middleware, rt *config.Runtime) {
+	h := system.NewConfigHandler(rt)
+
+	configGroup := r.Group("/config")
+	configGroup.Use(mw.RequireAuth())
+	{
+		configGroup.GET("/loading", h.GetLoading)
+		configGroup.POST("/loading", h.SaveLoading)
 	}
 }
 

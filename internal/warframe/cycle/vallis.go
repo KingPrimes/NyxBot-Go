@@ -19,9 +19,9 @@ type VallisCycle struct {
 }
 
 const (
-	vallisLoopTime  int64 = 1600000 // 总周期时长（毫秒）
-	vallisWarmTime  int64 = 400000  // 温暖期持续时间（毫秒）
-	vallisColdTime  int64 = vallisLoopTime - vallisWarmTime // 寒冷期持续时间
+	vallisLoopTime int64 = 1600000                         // 总周期时长（毫秒）
+	vallisWarmTime int64 = 400000                          // 温暖期持续时间（毫秒）
+	vallisColdTime int64 = vallisLoopTime - vallisWarmTime // 寒冷期持续时间
 )
 
 var vallisStart = time.Date(2018, 11, 10, 8, 13, 48, 0, time.UTC)

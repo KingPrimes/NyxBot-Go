@@ -29,7 +29,7 @@ func ComputeZarimanCycle(bountiesEndDate int64) *ZarimanCycle {
 	bountiesClone := bountiesEndDate - 5000
 	millisLeft := bountiesClone - now
 
-	cycleTimeElapsed := ((bountiesClone - zarimanCorpusTime) % zarimanFullCycle + zarimanFullCycle) % zarimanFullCycle
+	cycleTimeElapsed := ((bountiesClone-zarimanCorpusTime)%zarimanFullCycle + zarimanFullCycle) % zarimanFullCycle
 	cycleTimeLeft := zarimanFullCycle - cycleTimeElapsed
 	isCorpus := cycleTimeLeft > zarimanStateMax
 

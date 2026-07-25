@@ -3,10 +3,10 @@
 package bot
 
 type BotAdmin struct {
-	ID          uint   `gorm:"primaryKey"`                             // 主键
-	BotUID      int64  `gorm:"column:bot_uid"`                         // 机器人 QQ
-	AdminUID    int64  `gorm:"column:admin_uid"`                       // 管理员 QQ
-	Permissions string `gorm:"column:permissions"`                     // 权限等级（如 admin/super_admin）
+	ID          uint   `gorm:"primaryKey"`         // 主键
+	BotUID      int64  `gorm:"column:bot_uid"`     // 机器人 QQ
+	AdminUID    int64  `gorm:"column:admin_uid"`   // 管理员 QQ
+	Permissions string `gorm:"column:permissions"` // 权限等级（如 admin/super_admin）
 }
 
 func (BotAdmin) TableName() string {

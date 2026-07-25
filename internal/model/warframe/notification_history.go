@@ -5,7 +5,7 @@ package warframe
 import "time"
 
 type NotificationHistory struct {
-	ID      uint      `gorm:"primaryKey"`   // 主键
+	ID      uint      `gorm:"primaryKey"`     // 主键
 	Message string    `gorm:"column:message"` // 通知消息内容
 	Time    time.Time `gorm:"column:time"`    // 通知时间
 	IsPush  bool      `gorm:"column:is_push"` // 是否已推送

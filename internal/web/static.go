@@ -10,9 +10,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// staticDir 前端静态文件目录。前端 dist 产物在打包时会内嵌进可执行文件，
+// 目录路径不开放配置项，统一使用该常量。
+const staticDir = "./resources/static"
+
 // RegisterStaticRoutes 注册静态文件路由和 Vue SPA 兜底路由。
 // 已构建的前端 dist 目录应存放于 staticDir 下。
-func RegisterStaticRoutes(r *gin.Engine, staticDir string) {
+func RegisterStaticRoutes(r *gin.Engine) {
 	r.Static("/static", filepath.Join(staticDir, "static"))
 	r.StaticFile("/favicon.ico", filepath.Join(staticDir, "favicon.ico"))
 	r.StaticFile("/favicon.svg", filepath.Join(staticDir, "favicon.svg"))
@@ -27,7 +31,7 @@ func RegisterStaticRoutes(r *gin.Engine, staticDir string) {
 			return
 		}
 
-		indexFile := resolveIndexFile(staticDir)
+		indexFile := resolveIndexFile()
 		if _, err := os.Stat(indexFile); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"code": 404,
@@ -41,7 +45,7 @@ func RegisterStaticRoutes(r *gin.Engine, staticDir string) {
 	})
 }
 
-func resolveIndexFile(staticDir string) string {
+func resolveIndexFile() string {
 	indexFile := filepath.Join(staticDir, "index.html")
 	if _, err := os.Stat(indexFile); err == nil {
 		return indexFile

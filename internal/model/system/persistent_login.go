@@ -6,9 +6,9 @@ import "time"
 
 type PersistentLogin struct {
 	Series   string    `gorm:"primaryKey;column:series;size:64"` // 系列标识
-	Username string    `gorm:"column:username;size:64"`           // 用户名
-	Token    string    `gorm:"column:token;size:64"`              // 登录 token
-	LastUsed time.Time `gorm:"column:last_used"`                  // 最后使用时间
+	Username string    `gorm:"column:username;size:64"`          // 用户名
+	Token    string    `gorm:"column:token;size:64"`             // 登录 token
+	LastUsed time.Time `gorm:"column:last_used"`                 // 最后使用时间
 }
 
 func (PersistentLogin) TableName() string {

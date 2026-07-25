@@ -3,7 +3,7 @@
 package system
 
 type Hint struct {
-	ID   uint   `gorm:"primaryKey"`          // 主键
+	ID   uint   `gorm:"primaryKey"`                // 主键
 	Hint string `gorm:"column:hint;type:longtext"` // 提示文本内容
 }
 

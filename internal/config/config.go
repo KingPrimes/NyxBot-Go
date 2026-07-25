@@ -3,76 +3,150 @@
 package config
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
+	"reflect"
+	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 	"nyxbot-go/internal/logging"
 )
 
 // Config 顶层应用配置，包含 Server、Database、Log、Bot、Auth 五个子配置项。
+// 各字段的 comment 标签是生成 config.yaml 时写入对应条目头注释的文本，
+// 新增字段必须同步填写 comment 标签，否则生成的配置文件缺少注释。
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Log       LogConfig       `yaml:"log"`
-	Bot       BotConfig       `yaml:"bot"`
-	Auth      AuthConfig      `yaml:"auth"`
+	Server   ServerConfig   `yaml:"server" comment:"HTTP 服务器配置"`
+	Database DatabaseConfig `yaml:"database" comment:"SQLite 数据库配置"`
+	Log      LogConfig      `yaml:"log" comment:"日志系统配置"`
+	Bot      BotConfig      `yaml:"bot" comment:"OneBot 连接配置"`
+	Auth     AuthConfig     `yaml:"auth" comment:"认证鉴权配置"`
 }
 
 // ServerConfig HTTP 服务器配置。
+// 监听主机地址固定为本机地址（见 listenHost）；前端静态文件在打包时内嵌进
+// 可执行文件，目录路径同样不开放配置（见 internal/web）。
 type ServerConfig struct {
-	Host           string   `yaml:"host"`            // 监听主机地址
-	Port           string   `yaml:"port"`            // 监听端口
-	StaticDir      string   `yaml:"static_dir"`      // 前端静态文件目录
-	GinMode        string   `yaml:"gin_mode"`        // Gin 框架运行模式（debug/release/test）
-	RequestLog     bool     `yaml:"request_log"`     // 是否记录 HTTP 请求日志
-	TrustedProxies []string `yaml:"trusted_proxies"` // 信任的代理 IP 列表
+	Port           string   `yaml:"port" comment:"监听端口"`                                // 监听端口
+	GinMode        string   `yaml:"gin_mode" comment:"Gin 运行模式：debug / release / test"` // Gin 框架运行模式（debug/release/test）
+	RequestLog     bool     `yaml:"request_log" comment:"是否记录 HTTP 请求日志"`               // 是否记录 HTTP 请求日志
+	TrustedProxies []string `yaml:"trusted_proxies" comment:"信任的代理 IP 列表"`              // 信任的代理 IP 列表
 }
 
 // DatabaseConfig SQLite 数据库配置。
 type DatabaseConfig struct {
-	Path string `yaml:"path"` // 数据库文件路径
+	Path string `yaml:"path" comment:"数据库文件路径"` // 数据库文件路径
 }
 
 // LogConfig 日志系统配置。
 type LogConfig struct {
-	Startup        bool   `yaml:"startup"`          // 启动时是否打印初始化日志
-	Console        bool   `yaml:"console"`          // 是否输出到控制台
-	Dir            string `yaml:"dir"`              // 日志文件目录
-	MaxFileSizeMB  int    `yaml:"max_file_size_mb"` // 单个日志文件最大体积（MB）
-	MaxAgeDays     int    `yaml:"max_age_days"`     // 日志文件保留天数
-	HistorySize    int    `yaml:"history_size"`     // 内存中保留的历史日志条数
+	Startup       bool   `yaml:"startup" comment:"启动时是否打印初始化日志"`                  // 启动时是否打印初始化日志
+	Console       bool   `yaml:"console" comment:"是否输出日志到控制台"`                    // 是否输出到控制台
+	Dir           string `yaml:"dir" comment:"日志文件目录"`                            // 日志文件目录
+	MaxFileSizeMB int    `yaml:"max_file_size_mb" comment:"单个日志文件最大体积（MB），超出后轮转"` // 单个日志文件最大体积（MB）
+	MaxAgeDays    int    `yaml:"max_age_days" comment:"日志文件保留天数"`                 // 日志文件保留天数
+	HistorySize   int    `yaml:"history_size" comment:"内存中保留的历史日志条数"`             // 内存中保留的历史日志条数
 }
 
-// BotConfig OneBot 机器人连接配置。
+// OneBot 连接模式常量（BotConfig.Mode 的合法取值）。
+const (
+	BotModeServer = "server" // 反向 WS：本服务作为 WS 服务端等待 Bot 接入
+	BotModeClient = "client" // 正向 WS：本服务主动连接 OneBot 实现的 WS 服务端
+)
+
+// BotConfig OneBot 连接配置，字段对齐 ZeroBot SDK 的 driver 参数。
+// ZeroBot 原生 WSServer 仅取 URL 的 Host 独立监听（丢弃路径），本项目为保持
+// 与前端/Java 一致的“主服务端口 + 路径”形态，反向 WS 通过自定义 zero.Driver
+// 挂载到 Gin 主服务的 WsServerPath 上（阶段 7 实现）。
 type BotConfig struct {
-	WsURL string `yaml:"ws_url"` // WebSocket 路径
+	Mode         string `yaml:"mode" comment:"连接模式：server=反向 WS（等待 Bot 接入）/ client=正向 WS（主动连接 OneBot）"` // 连接模式：server=反向 WS / client=正向 WS（driver.NewWebSocketClient）
+	WsServerPath string `yaml:"ws_server_path" comment:"反向 WS 挂载路径（mode=server 时生效）"`                   // 反向 WS 挂载路径（对应 ZeroBot WSServer 端点，挂 Gin 主服务）
+	WsClientURL  string `yaml:"ws_client_url" comment:"正向 WS 连接地址（mode=client 时生效）"`                    // 正向 WS 地址，对应 driver.NewWebSocketClient 的 url 参数
+	AccessToken  string `yaml:"access_token" comment:"OneBot 鉴权令牌"`                                     // OneBot 鉴权令牌，对应 ZeroBot driver 的 accessToken 参数
+	WaitN        int    `yaml:"wait_n" comment:"反向 WS 并发等待数"`                                           // 反向 WS 并发等待数，对应 driver.NewWebSocketServer 的 waitn 参数
+	PluginPrefix bool   `yaml:"plugin_prefix" comment:"是否使用艾特触发指令"`                                     // 是否使用艾特触发指令（NyxBot 业务语义）
+	PluginName   string `yaml:"plugin_name" comment:"当前选中的绘图插件名称"`                                      // 当前选中的绘图插件名称
 }
 
 // AuthConfig 认证鉴权配置。
 type AuthConfig struct {
-	JwtSecret string `yaml:"jwt_secret"` // JWT 签名密钥
+	JwtSecret string `yaml:"jwt_secret" comment:"JWT 签名密钥（首次启动时随机生成，请勿泄露）"` // JWT 签名密钥，首启随机生成
 }
 
-// Addr 返回监听地址字符串（host:port）。
+// listenHost 监听主机地址，固定为本机地址（0.0.0.0 表示监听全部网卡），不开放配置项。
+const listenHost = "0.0.0.0"
+
+// Addr 返回监听地址字符串（host:port），host 固定为本机地址。
 func (c Config) Addr() string {
-	return c.Server.Host + ":" + c.Server.Port
+	return listenHost + ":" + c.Server.Port
 }
 
-// Load 加载配置文件，返回合并了环境变量覆盖的完整配置。
-// 按优先级：默认值 < config.yaml < 环境变量。
+// Runtime 持有运行期配置，提供并发安全的读取与原子更新（改内存 + 落盘 YAML）。
+// 保存接口等运行期修改通过 Update 完成，使新值立即对后续 Config() 调用生效；
+// 监听端口等启动期参数仍需重启进程才会应用。
+type Runtime struct {
+	mu   sync.RWMutex
+	cfg  Config
+	path string
+}
+
+// NewRuntime 基于初始配置和落盘路径创建运行时配置持有者。
+func NewRuntime(cfg Config, path string) *Runtime {
+	return &Runtime{cfg: cfg, path: path}
+}
+
+// Config 返回当前配置的快照副本。
+func (r *Runtime) Config() Config {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.cfg
+}
+
+// Path 返回配置落盘的 YAML 文件路径。
+func (r *Runtime) Path() string {
+	return r.path
+}
+
+// Update 在写锁内通过 fn 修改配置，随后将完整配置写回 YAML 文件。
+// 写文件失败时内存中的修改仍然保留，调用方可据此决定是否向客户端报错。
+func (r *Runtime) Update(fn func(*Config)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fn(&r.cfg)
+	return writeConfig(r.path, r.cfg)
+}
+
+// Load 加载默认路径 config.yaml 的配置文件，返回合并了环境变量覆盖的完整配置。
 func Load() Config {
+	return LoadFrom("config.yaml")
+}
+
+// LoadFrom 加载指定路径的配置文件，缺失时生成默认配置（JWT 密钥随机生成并随文件落盘）。
+// 按优先级：默认值 < YAML 文件 < 环境变量。
+func LoadFrom(path string) Config {
 	cfg := defaultConfig()
 
-	if data, err := os.ReadFile("config.yaml"); err == nil {
+	if data, err := os.ReadFile(path); err == nil {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			logging.WarnPack("config", "config.yaml parse error, using defaults: %v", err)
+			logging.WarnPack("config", "%s parse error, using defaults: %v", path, err)
 		}
 	} else {
-		if err := writeDefaultConfig("config.yaml", cfg); err != nil {
-			logging.ErrorPack("config", "config.yaml not found and create default config failed: %v", err)
+		cfg.Auth.JwtSecret = generateJwtSecret()
+		if err := writeConfig(path, cfg); err != nil {
+			logging.ErrorPack("config", "%s not found and create default config failed: %v", path, err)
 		} else {
-			logging.InfoPack("config", "config.yaml not found, default config created")
+			logging.InfoPack("config", "%s not found, default config created", path)
 		}
+	}
+
+	if cfg.Auth.JwtSecret == "" {
+		// 配置文件存在但未设置 jwt_secret（或内容损坏）：随机生成一个保证鉴权可用，
+		// 仅驻留内存不落盘以避免覆盖用户文件，重启后旧 token 失效。
+		cfg.Auth.JwtSecret = generateJwtSecret()
+		logging.WarnPack("config", "jwt_secret not set, random secret generated in memory; set jwt_secret in %s to keep tokens valid after restart", path)
 	}
 
 	overrideFromEnv(&cfg)
@@ -80,9 +154,17 @@ func Load() Config {
 	return cfg
 }
 
-// writeDefaultConfig 将默认配置写入指定路径。
-func writeDefaultConfig(path string, cfg Config) error {
-	data, err := yaml.Marshal(cfg)
+// generateJwtSecret 生成随机 JWT 签名密钥，返回 32 字节随机数的十六进制编码（64 字符）。
+// Go 1.24 起 crypto/rand.Read 保证不会失败，故忽略其错误返回值。
+func generateJwtSecret() string {
+	buf := make([]byte, 32)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
+}
+
+// writeConfig 将配置以带字段注释的 YAML 格式写入指定路径。
+func writeConfig(path string, cfg Config) error {
+	data, err := marshalWithComments(cfg)
 	if err != nil {
 		return err
 	}
@@ -90,13 +172,113 @@ func writeDefaultConfig(path string, cfg Config) error {
 	return os.WriteFile(path, data, 0644)
 }
 
+// marshalWithComments 将配置编码为带注释的 YAML 字节流。
+// 注释文本取自结构体字段的 comment 标签，作为头注释挂到对应条目上方；
+// 顶层分节之间插入空行便于阅读。
+func marshalWithComments(cfg Config) ([]byte, error) {
+	node := &yaml.Node{}
+	if err := node.Encode(cfg); err != nil {
+		return nil, err
+	}
+	applyComments(node, "", fieldComments())
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(node); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return separateSections(buf.Bytes()), nil
+}
+
+// fieldComments 通过反射收集 Config 结构体字段的 comment 标签，
+// 返回 YAML 点分路径到注释文本的映射（如 "server.port" -> "监听端口"）。
+func fieldComments() map[string]string {
+	comments := make(map[string]string)
+	collectFieldComments(reflect.TypeOf(Config{}), "", comments)
+	return comments
+}
+
+// collectFieldComments 递归遍历结构体字段，按 YAML 键名拼出点分路径并记录 comment 标签。
+func collectFieldComments(t reflect.Type, prefix string, comments map[string]string) {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		yamlName, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+		if yamlName == "" || yamlName == "-" {
+			continue
+		}
+		path := yamlName
+		if prefix != "" {
+			path = prefix + "." + yamlName
+		}
+		if comment := field.Tag.Get("comment"); comment != "" {
+			comments[path] = comment
+		}
+		if field.Type.Kind() == reflect.Struct {
+			collectFieldComments(field.Type, path, comments)
+		}
+	}
+}
+
+// applyComments 递归遍历 YAML 节点树，为映射键节点挂载注释映射表中的头注释。
+// path 为父级 YAML 点分路径，空串表示根。
+func applyComments(node *yaml.Node, path string, comments map[string]string) {
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			applyComments(child, path, comments)
+		}
+	case yaml.MappingNode:
+		// MappingNode 的 Content 按 [key, value, key, value ...] 成对排列
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key, value := node.Content[i], node.Content[i+1]
+			childPath := key.Value
+			if path != "" {
+				childPath = path + "." + key.Value
+			}
+			if comment, ok := comments[childPath]; ok {
+				key.HeadComment = comment
+			}
+			applyComments(value, childPath, comments)
+		}
+	}
+}
+
+// separateSections 在顶层分节（含其头注释块）之间插入空行，使生成的配置文件分节清晰。
+func separateSections(data []byte) []byte {
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	out := make([]string, 0, len(lines)+4)
+	for _, line := range lines {
+		if isTopLevelKey(line) {
+			// 空行需插到头注释块之前，与上一节隔开
+			j := len(out)
+			for j > 0 && strings.HasPrefix(out[j-1], "#") {
+				j--
+			}
+			if j > 0 && out[j-1] != "" {
+				tail := append([]string{""}, out[j:]...)
+				out = append(out[:j], tail...)
+			}
+		}
+		out = append(out, line)
+	}
+	return []byte(strings.Join(out, "\n") + "\n")
+}
+
+// isTopLevelKey 判断是否为顶层分节键行（无缩进、非注释、非空行）。
+func isTopLevelKey(line string) bool {
+	return line != "" && line[0] != ' ' && line[0] != '#'
+}
+
 // defaultConfig 返回出厂默认配置。
+// JwtSecret 留空：首启生成配置文件时由 LoadFrom 随机生成并落盘。
 func defaultConfig() Config {
 	return Config{
 		Server: ServerConfig{
-			Host:           "0.0.0.0",
 			Port:           "8080",
-			StaticDir:      "./resources/static",
 			GinMode:        "release",
 			RequestLog:     false,
 			TrustedProxies: nil,
@@ -113,24 +295,24 @@ func defaultConfig() Config {
 			HistorySize:   50,
 		},
 		Bot: BotConfig{
-			WsURL: "/ws/shiro",
+			Mode:         "server",
+			WsServerPath: "/ws/shiro",
+			WsClientURL:  "ws://localhost:3001",
+			AccessToken:  "",
+			WaitN:        16,
+			PluginPrefix: false,
+			PluginName:   "",
 		},
 		Auth: AuthConfig{
-			JwtSecret: "nyxbot-secret-key",
+			JwtSecret: "",
 		},
 	}
 }
 
 // overrideFromEnv 用环境变量覆盖配置字段（仅顶层字段）。
 func overrideFromEnv(cfg *Config) {
-	if v := os.Getenv("APP_HOST"); v != "" {
-		cfg.Server.Host = v
-	}
 	if v := os.Getenv("APP_PORT"); v != "" {
 		cfg.Server.Port = v
-	}
-	if v := os.Getenv("APP_STATIC_DIR"); v != "" {
-		cfg.Server.StaticDir = v
 	}
 	if v := os.Getenv("GIN_MODE"); v != "" {
 		cfg.Server.GinMode = v
