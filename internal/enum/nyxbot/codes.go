@@ -1,4 +1,8 @@
 // NyxBot Codes 指令枚举 —— 指令 -> 所需权限映射
+// CodeInfo.Comm 为指令匹配正则（Java shiro 沿用而来），阶段 7 将经 zero.OnRegex 注册：
+// ZeroBot RegexRule 使用 Go RE2 的 FindStringSubmatch（find 语义），与 Java shiro
+// MessageHandlerFilter 的 Matcher.find 完全一致，故全部模式无需改写；
+// 匹配结果（含捕获组）存于 ctx.State["regex_matched"]。RE2 兼容性由 tests/command_match_test.go 守护。
 package nyxbot
 
 type CodeInfo struct {
@@ -92,4 +96,49 @@ var CodesInfo = map[Codes]CodeInfo{
 	CmdWfKnownCalendarSeasons:   {Comm: `^(1999|日历)$`, Permissions: PermUser},
 	CmdWfSubscribe:              {Comm: `^订阅`, Permissions: PermUser},
 	CmdWfUnsubscribe:            {Comm: `^取消订阅`, Permissions: PermUser},
+}
+
+// CodesOrder 按 Java Codes 枚举声明顺序排列的全部指令，
+// 新增指令常量时必须同步追加（/log/codes 选项顺序依赖此切片）。
+var CodesOrder = []Codes{
+	CmdHelp,
+	CmdCheckVersion,
+	CmdUpdateWfResMarketItems,
+	CmdUpdateWfResMarketRiven,
+	CmdUpdateWfSister,
+	CmdUpdateWfTar,
+	CmdWfAlerts,
+	CmdWfSorties,
+	CmdWfLiteSortie,
+	CmdWfVoid,
+	CmdWfArbitrationEx,
+	CmdWfArbitration,
+	CmdWfDailyDeals,
+	CmdWfInvasions,
+	CmdWfActiveMission,
+	CmdWfVoidStorms,
+	CmdWfActiveMissionPath,
+	CmdWfSteelPath,
+	CmdWfAllCycle,
+	CmdWfSyndicateOstrons,
+	CmdWfSyndicateEntrati,
+	CmdWfSyndicateSolarisUnited,
+	CmdWfDuviriCycle,
+	CmdWfNightWave,
+	CmdWfRivenDisUpdate,
+	CmdWfTra,
+	CmdWfMarketRiven,
+	CmdWfMarketOrders,
+	CmdWfRivenMarket,
+	CmdWfLichs,
+	CmdWfSisters,
+	CmdWfPerlinSequence,
+	CmdWfMarketGodDump,
+	CmdWfMarketSilverDump,
+	CmdWfRelics,
+	CmdWfOpenRelics,
+	CmdWfRivenAnalyse,
+	CmdWfSubscribe,
+	CmdWfUnsubscribe,
+	CmdWfKnownCalendarSeasons,
 }

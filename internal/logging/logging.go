@@ -239,6 +239,13 @@ func Recent(min Level) []Entry {
 	return logs
 }
 
+// HistorySize 返回内存历史日志的最大缓存条数（对应 Java LogCacheManager 的 MAX_CACHE_SIZE）。
+func HistorySize() int {
+	mu.RLock()
+	defer mu.RUnlock()
+	return config.HistorySize
+}
+
 func format(entry Entry) string {
 	timestamp := entry.Time.Format("2006-01-02 15:04:05")
 	base := fmt.Sprintf("%s [%s] [%s] [%s] %s", timestamp, entry.Level, entry.Thread, entry.Pack, entry.Message)

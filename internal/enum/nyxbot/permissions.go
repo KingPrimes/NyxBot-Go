@@ -104,3 +104,7 @@ func (l LogTitleEnum) Title() string {
 	}
 	return m[l]
 }
+
+// LogTitles 按 Java LogTitleEnum 声明顺序排列的全部日志标题，
+// 新增枚举值时必须同步追加（/log/titles 选项顺序依赖此切片）。
+var LogTitles = []LogTitleEnum{LogTitleOther, LogTitlePlugin, LogTitleController}

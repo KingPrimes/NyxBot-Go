@@ -53,7 +53,12 @@ func Page(c *gin.Context, total int64, size, current int, records any) {
 
 // Fail 返回失败响应，设置指定的状态码和消息。
 func Fail(c *gin.Context, code int, msg string) {
-	c.JSON(code, Response{
+	FailWithHTTP(c, code, code, msg)
+}
+
+// FailWithHTTP 返回失败响应，并允许 HTTP 状态码与业务状态码分别指定。
+func FailWithHTTP(c *gin.Context, httpStatus, code int, msg string) {
+	c.JSON(httpStatus, Response{
 		Code: code,
 		Msg:  msg,
 		Data: nil,

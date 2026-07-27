@@ -255,13 +255,7 @@ func filteredDTOList(sessionID string, entries []logging.Entry) []logSSEData {
 }
 
 func toLogSSEData(entry logging.Entry) logSSEData {
-	level := entry.Level
-	if level == logging.LevelHTTP {
-		level = logging.LevelInfo
-	}
-	if level == logging.LevelPanic {
-		level = logging.LevelError
-	}
+	level := normalizeLogLevel(entry.Level)
 	thread := entry.Thread
 	if thread == "" {
 		thread = "goroutine-unknown"
@@ -278,6 +272,17 @@ func toLogSSEData(entry logging.Entry) logSSEData {
 		Pack:   pack,
 		Log:    entry.Message,
 	}
+}
+
+// normalizeLogLevel 将 Go 侧扩展级别归一到标准级别：HTTP 按 INFO、PANIC 按 ERROR 展示。
+func normalizeLogLevel(level logging.Level) logging.Level {
+	if level == logging.LevelHTTP {
+		return logging.LevelInfo
+	}
+	if level == logging.LevelPanic {
+		return logging.LevelError
+	}
+	return level
 }
 
 func logLevelAllowed(actual logging.Level, min logging.Level) bool {
