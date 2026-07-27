@@ -37,8 +37,8 @@ type loadingConfigUpdate struct {
 }
 
 var (
-	// wsServerURLPattern 对齐 Java isValidateServerUrl：^/([A-z]+)/?([A-z]+)?
-	wsServerURLPattern = regexp.MustCompile(`^/([A-z]+)/?([A-z]+)?`)
+	// wsServerURLPattern 对齐 Java 的一至两段字母路径，并拒绝尾随非法内容。
+	wsServerURLPattern = regexp.MustCompile(`^/[A-Za-z]+(?:/[A-Za-z]+)?$`)
 	// wsClientURLPattern 对齐 Java isValidateClientUrl。
 	wsClientURLPattern = regexp.MustCompile(`^(ws|wss)://[\w.-]+(:\d+)?(/([\w/_.-]*(\?\S+)?)?)?$`)
 )
@@ -60,7 +60,7 @@ func (h *ConfigHandler) GetLoading(c *gin.Context) {
 
 // SaveLoading 处理 POST /config/loading，校验后按非 nil 字段合并配置并写回 YAML。
 // 校验失败返回 500（对齐 Java BaseController.error），成功返回 { code: 200 }。
-// 端口等启动期参数修改后需重启进程生效，其余字段运行时即时生效。
+// 端口、连接模式、WS 地址和令牌修改后需重启进程生效；pluginPrefix 即时生效。
 func (h *ConfigHandler) SaveLoading(c *gin.Context) {
 	var req loadingConfigUpdate
 	if err := c.ShouldBindJSON(&req); err != nil {

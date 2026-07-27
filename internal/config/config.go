@@ -60,7 +60,7 @@ const (
 // BotConfig OneBot 连接配置，字段对齐 ZeroBot SDK 的 driver 参数。
 // ZeroBot 原生 WSServer 仅取 URL 的 Host 独立监听（丢弃路径），本项目为保持
 // 与前端/Java 一致的“主服务端口 + 路径”形态，反向 WS 通过自定义 zero.Driver
-// 挂载到 Gin 主服务的 WsServerPath 上（阶段 7 实现）。
+// 挂载到 Gin 主服务的 WsServerPath 上。
 type BotConfig struct {
 	Mode         string `yaml:"mode" comment:"连接模式：server=反向 WS（等待 Bot 接入）/ client=正向 WS（主动连接 OneBot）"` // 连接模式：server=反向 WS / client=正向 WS（driver.NewWebSocketClient）
 	WsServerPath string `yaml:"ws_server_path" comment:"反向 WS 挂载路径（mode=server 时生效）"`                   // 反向 WS 挂载路径（对应 ZeroBot WSServer 端点，挂 Gin 主服务）

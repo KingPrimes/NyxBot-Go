@@ -21,7 +21,7 @@ type LogInfo struct {
 	RunTime       int64     `gorm:"column:run_time" json:"runTime"`                 // 执行耗时（毫秒）
 	Param         string    `gorm:"column:param;type:text" json:"param"`            // 请求参数（JSON）
 	Result        string    `gorm:"column:result;type:text" json:"result"`          // 返回结果（JSON）
-	Status        int       `gorm:"column:status" json:"status"`                    // 执行状态（0=失败/1=成功）
+	Status        int       `gorm:"column:status" json:"status"`                    // 执行状态（Java BusinessStatus：0=成功/1=失败）
 	ErrorMsg      string    `gorm:"column:error_msg;type:longtext" json:"errorMsg"` // 错误信息
 	LogTime       time.Time `gorm:"column:log_time" json:"logTime"`                 // 日志记录时间
 }

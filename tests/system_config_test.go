@@ -216,6 +216,16 @@ func TestSaveLoadingConfigRejectsInvalidServerURL(t *testing.T) {
 	}
 }
 
+// TestSaveLoadingConfigRejectsServerURLSuffix 验证路径校验必须匹配完整字符串。
+func TestSaveLoadingConfigRejectsServerURLSuffix(t *testing.T) {
+	r, rt := setupConfigRouter(t)
+	token := issueToken(t, rt)
+	recorder := doRequest(t, r, http.MethodPost, "/config/loading", token, `{"wsServerUrl":"/ws/shiro?bad=true"}`)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected HTTP 500, got %d, body: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 // TestSaveLoadingConfigRejectsInvalidClientURL 验证非法 wsClientUrl 返回 500。
 func TestSaveLoadingConfigRejectsInvalidClientURL(t *testing.T) {
 	r, rt := setupConfigRouter(t)
