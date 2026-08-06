@@ -9,11 +9,13 @@ import (
 	"nyxbot-go/internal/logging"
 	"nyxbot-go/internal/response"
 	"nyxbot-go/internal/system"
+	"nyxbot-go/internal/warframe"
 	"nyxbot-go/internal/web"
 )
 
 // NewRouter 创建并配置 Gin Engine，注册认证路由、系统配置路由、API 路由和静态文件托管。
-func NewRouter(rt *config.Runtime) *gin.Engine {
+// dataHandler / dataUpdater 为 nil 时跳过 Warframe 数据管理路由（阶段 8 未启用）。
+func NewRouter(rt *config.Runtime, warframeComponents ...any) *gin.Engine {
 	cfg := rt.Config()
 	gin.SetMode(cfg.Server.GinMode)
 	gin.DebugPrintRouteFunc = func(httpMethod, absolutePath, handlerName string, nuHandlers int) {
@@ -36,7 +38,7 @@ func NewRouter(rt *config.Runtime) *gin.Engine {
 	registerAuthRoutes(r, authHandler, authMiddleware)
 	registerConfigRoutes(r, authMiddleware, rt)
 	registerLogRoutes(r, authMiddleware)
-	registerAPIRoutes(r)
+	registerAPIRoutes(r, authMiddleware, warframeComponents...)
 	web.RegisterStaticRoutes(r)
 
 	return r
@@ -116,11 +118,36 @@ func registerLogRoutes(r *gin.Engine, mw *auth.Middleware) {
 }
 
 // registerAPIRoutes 注册 /api/* 通用路由（健康检查等）和 SSE 日志流路由。
-func registerAPIRoutes(r *gin.Engine) {
+// warframeComponents 变参：第一个非 nil 的 *warframe.DataHandler 时注册 /data/warframe/**（挂 RequireAuth），
+// 第一个非 nil 的 *warframe.DataUpdater 时注册 /sse/data-refresh。
+func registerAPIRoutes(r *gin.Engine, mw *auth.Middleware, warframeComponents ...any) {
 	r.GET("/sse/log-now", streamLogs)
 	r.GET("/sse/stats", logSSEStats)
 	r.POST("/sse/filter/update", updateLogSSEFilter)
 	r.POST("/sse/filter/reset", resetLogSSEFilter)
+
+	var dataHandler *warframe.DataHandler
+	var dataUpdater *warframe.DataUpdater
+	for _, component := range warframeComponents {
+		switch typed := component.(type) {
+		case *warframe.DataHandler:
+			if typed != nil {
+				dataHandler = typed
+			}
+		case *warframe.DataUpdater:
+			if typed != nil {
+				dataUpdater = typed
+			}
+		}
+	}
+	if dataUpdater != nil {
+		r.GET("/sse/data-refresh", dataUpdater.HandleDataRefreshSSE)
+	}
+	if dataHandler != nil {
+		protected := r.Group("/data")
+		protected.Use(mw.RequireAuth())
+		dataHandler.Register(protected)
+	}
 
 	api := r.Group("/api")
 	{

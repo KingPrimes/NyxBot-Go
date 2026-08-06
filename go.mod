@@ -9,6 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.3.0
 	github.com/tidwall/gjson v1.18.0
+	github.com/ulikunitz/xz v0.5.16
 	github.com/wdvxdr1123/ZeroBot v1.8.2
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0

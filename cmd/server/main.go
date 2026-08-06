@@ -19,6 +19,7 @@ import (
 	"nyxbot-go/internal/onebot"
 	"nyxbot-go/internal/server"
 	"nyxbot-go/internal/version"
+	"nyxbot-go/internal/warframe"
 )
 
 // main 程序入口，支持 --version/--help 命令行参数。
@@ -53,7 +54,21 @@ func main() {
 
 	serverContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	r := server.NewRouter(rt)
+
+	// Warframe 数据层（阶段 8）：导出文件下载器 + 市场 API + 导入器 + 更新器 + HTTP 接口
+	exportClient := &http.Client{Timeout: 30 * time.Second}
+	exporter := warframe.NewExportFilePath(exportClient, "zh")
+	marketAPI := warframe.NewMarketAPI(exportClient)
+	importer := warframe.NewDataImporter(exporter, marketAPI, database.DB)
+	updater := warframe.NewDataUpdater(importer)
+	dataHandler := warframe.NewDataHandler(importer, updater)
+
+	// 启动异步导入（失败不阻塞主流程）与 WorldState 动态轮询
+	warframe.SetUserAgentVersion(version.Version)
+	go importer.ImportAll(serverContext)
+	go warframe.RunWorldStatePolling(serverContext, exportClient)
+
+	r := server.NewRouter(rt, dataHandler, updater)
 	botRuntime, err := onebot.NewRuntimeFromConfig(rt, botdirectory.DefaultDirectory)
 	if err != nil {
 		logging.ErrorPack("main", "OneBot disabled: %v", err)

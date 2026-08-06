@@ -75,6 +75,7 @@ func autoMigrate() error {
 		&warframe.MissionSubscribeUserCheckType{},
 		&warframe.Weapons{},
 		&warframe.Warframes{},
+		&warframe.WarframesAbility{},
 		&warframe.Upgrades{},
 		&warframe.Sentinels{},
 		&warframe.NightWave{},

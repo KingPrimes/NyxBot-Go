@@ -1,31 +1,31 @@
-// 午夜电波导出数据表，对应 Java NyxBot 的 exprot.NightWave 实体
-// 存储从官方 API 导出的午夜电波挑战数据（含赛季、声望、每日/每周/精英挑战）
+// 午夜电波导出数据表，对应 Java NyxBot 的 exprot.NightWave 实体（表 night_wave）
+// 存储从官方 API 导出的午夜电波挑战数据
 package warframe
 
+import (
+	"encoding/json"
+	"strings"
+)
+
+// NightWave 午夜电波挑战条目。uniqueName 为字符串主键。
+// Description 入库保留原始文本；JSON 输出时 |COUNT| 替换为 Required（对齐 Java getter 行为）。
+// JSON 字段对齐前端 Api.LocalData.NightWave。
 type NightWave struct {
-	ID                    uint   `gorm:"primaryKey"`                     // 主键
-	Name                  string `gorm:"column:name"`                    // 挑战名称（中文）
-	Standing              int    `gorm:"column:standing"`                // 声望值
-	Description           string `gorm:"column:description"`             // 挑战描述
-	EnName                string `gorm:"column:en_name"`                 // 英文名
-	ImageName             string `gorm:"column:image_name"`              // 图片文件名
-	Tags                  string `gorm:"column:tags"`                    // 标签
-	Season                int    `gorm:"column:season"`                  // 赛季编号
-	SeasonStarted         string `gorm:"column:season_started"`          // 赛季开始时间
-	SeasonEnd             string `gorm:"column:season_end"`              // 赛季结束时间
-	ActiveChallenges      string `gorm:"column:active_challenges"`       // 当前活跃挑战（JSON）
-	DailyChallenges       string `gorm:"column:daily_challenges"`        // 每日挑战（JSON）
-	WeeklyChallenges      string `gorm:"column:weekly_challenges"`       // 每周挑战（JSON）
-	EliteWeeklyChallenges string `gorm:"column:elite_weekly_challenges"` // 精英每周挑战（JSON）
-	Reputation            int    `gorm:"column:reputation"`              // 声望总量
-	Exclude               bool   `gorm:"column:exclude"`                 // 是否排除
-	IsDaily               bool   `gorm:"column:is_daily"`                // 是否为每日挑战
-	IsWeekly              bool   `gorm:"column:is_weekly"`               // 是否为每周挑战
-	IsElite               bool   `gorm:"column:is_elite"`                // 是否为精英挑战
-	Evergreens            string `gorm:"column:evergreens"`              // 常驻奖励（JSON）
-	Available             bool   `gorm:"column:available"`               // 是否可用
+	UniqueName  string `gorm:"primaryKey" json:"uniqueName"`          // 主键（唯一标识）
+	Name        string `gorm:"column:name" json:"name"`               // 挑战名称（中文）
+	Description string `gorm:"column:description" json:"description"` // 挑战描述（含 |COUNT| 占位）
+	Standing    int    `gorm:"column:standing" json:"standing"`       // 声望值
+	Required    int    `gorm:"column:required" json:"required"`       // 需要完成次数
 }
 
 func (NightWave) TableName() string {
-	return "exprot_nightwave"
+	return "night_wave"
+}
+
+// MarshalJSON 输出时替换 description 中的 |COUNT| 占位（对齐 Java getDescription()）。
+func (record NightWave) MarshalJSON() ([]byte, error) {
+	type plain NightWave
+	aliased := plain(record)
+	aliased.Description = strings.ReplaceAll(record.Description, "|COUNT|", toString(record.Required))
+	return json.Marshal(aliased)
 }
