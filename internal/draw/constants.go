@@ -8,13 +8,13 @@ const footerText = "Posted by: KingPrimes"
 
 // 标准图像尺寸。
 const (
-	imageWidth      = 1200 // 标准图像宽度
-	imageMargin     = 40   // 标准图像边距
-	imageTitleH     = 50   // 标准图像标题高度
-	imageRowHeight  = 50   // 标准图像行高度
-	imageMarginTop  = 60   // 标准图像上边距
-	imageFooterH    = 40   // 标准图像底部高度
-	standardRatio   = 0.3  // 看板娘绘制比例
+	imageWidth     = 1200 // 标准图像宽度
+	imageMargin    = 40   // 标准图像边距
+	imageTitleH    = 50   // 标准图像标题高度
+	imageRowHeight = 50   // 标准图像行高度
+	imageMarginTop = 60   // 标准图像上边距
+	imageFooterH   = 40   // 标准图像底部高度
+	standardRatio  = 0.3  // 看板娘绘制比例
 )
 
 // 暗色主题颜色（对齐 DrawConstants 十六进制值）。
