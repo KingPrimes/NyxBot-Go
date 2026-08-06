@@ -1,5 +1,6 @@
 // 市场 API 封装，对应 Java NyxBot 的 HttpUtils.marketSendGet
 // 提供 warframe.market 各端点的请求与 429/超时错误文案，供数据导入与市场指令使用
+// 字段解析对齐 Java：gameRef 为顶层字段，name/icon/thumb 从 i18n.zh-hans 嵌套读取
 package warframe
 
 import (
@@ -24,9 +25,10 @@ const marketTimeout = 15 * time.Second
 // MarketAPI 封装 warframe.market 的 HTTP 请求与进程内缓存。
 // 对齐 Java HttpUtils.marketSendGet 的 120s 缓存语义（按 URL 缓存）。
 type MarketAPI struct {
-	client *http.Client
-	mu     sync.Mutex
-	cache  map[string]marketCacheEntry // URL -> 缓存条目
+	client  *http.Client
+	baseURL string // API 根地址（默认 marketBaseURL，测试可注入）
+	mu      sync.Mutex
+	cache   map[string]marketCacheEntry // URL -> 缓存条目
 }
 
 // marketCacheEntry 单条 URL 缓存：响应 JSON + 拉取时间。
@@ -43,7 +45,14 @@ func NewMarketAPI(client *http.Client) *MarketAPI {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &MarketAPI{client: client, cache: make(map[string]marketCacheEntry)}
+	return &MarketAPI{client: client, baseURL: marketBaseURL, cache: make(map[string]marketCacheEntry)}
+}
+
+// NewMarketAPIWithBaseURL 创建使用指定根地址的市场 API 客户端（供测试注入本地服务器）。
+func NewMarketAPIWithBaseURL(client *http.Client, baseURL string) *MarketAPI {
+	api := NewMarketAPI(client)
+	api.baseURL = strings.TrimRight(baseURL, "/")
+	return api
 }
 
 // Get 发起市场 API GET 请求（进程内缓存 120s），返回响应 JSON 字节。
@@ -68,7 +77,7 @@ func (api *MarketAPI) Get(url string) ([]byte, error) {
 	return body, nil
 }
 
-// Invalidate 清除全部缓存（数据更新任务完成后调用）。
+// Invalidate 清除全部缓存（数据更新任务开始前调用，确保任务拉取最新数据）。
 func (api *MarketAPI) Invalidate() {
 	api.mu.Lock()
 	api.cache = make(map[string]marketCacheEntry)
@@ -109,109 +118,137 @@ func (api *MarketAPI) doGet(url string) ([]byte, error) {
 	return body, nil
 }
 
-// marketPayload 市场 API 通用响应外壳 { payload: { ... } }。
+// marketPayload 市场 API 通用响应外壳 { payload: { items: [...] } }。
 type marketPayload struct {
 	Payload struct {
 		Items []json.RawMessage `json:"items"`
 	} `json:"payload"`
 }
 
-// MarketItem 市场物品条目（/v2/items 的元素），i18n 取 zh-hans。
-type MarketItem struct {
-	ID            string `json:"id"`
-	Slug          string `json:"url_name"`
-	GameRef       string `json:"item_name"`
-	Icon          string `json:"icon"`
-	Thumb         string `json:"thumb"`
-	Ducats        int    `json:"ducats"`
-	Vaulted       bool   `json:"vaulted"`
-	MaxRank       int    `json:"max_rank"`
-	BulkTradable  bool   `json:"bulk_tradable"`
-	MaxAmberStars int    `json:"max_amber_stars"`
-	MaxCyanStars  int    `json:"max_cyan_stars"`
-	BaseEndo      int    `json:"base_endo"`
-	TradingTax    int    `json:"trading_tax"`
-
-	Name   string `json:"name"`    // 填充后的中文名
-	EnName string `json:"en_name"` // 填充后的英文名
-}
-
-// FetchItems 拉取 /v2/items 全量市场物品，返回中文名填充后的条目列表。
-// i18n 结构：{ item_name, icon, thumb, ... }，zh-hans 字段在 item 内联。
-func (api *MarketAPI) FetchItems() ([]MarketItem, error) {
-	body, err := api.Get(marketBaseURL + "/v2/items")
-	if err != nil {
-		return nil, err
-	}
-	var envelope struct {
-		Payload struct {
-			Items []MarketItem `json:"items"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, fmt.Errorf("parse /v2/items: %w", err)
-	}
-	items := envelope.Payload.Items
-	results := make([]MarketItem, 0, len(items))
-	for _, item := range items {
-		item.EnName = item.GameRef
-		item.Name = item.GameRef
-		results = append(results, item)
-	}
-	return results, nil
-}
-
-// FetchRivenWeapons 拉取 /v2/riven/weapons 紫卡武器列表。
-func (api *MarketAPI) FetchRivenWeapons() ([]json.RawMessage, error) {
-	body, err := api.Get(marketBaseURL + "/v2/riven/weapons")
+// fetchItemsRaw 拉取指定端点的 items 原始数组。
+func (api *MarketAPI) fetchItemsRaw(url string) ([]json.RawMessage, error) {
+	body, err := api.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	var envelope marketPayload
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, fmt.Errorf("parse /v2/riven/weapons: %w", err)
+		return nil, fmt.Errorf("parse %s: %w", url, err)
 	}
 	return envelope.Payload.Items, nil
 }
 
-// FetchLichSisterWeapons 拉取赤毒/信条武器（/v2/lich/weapons + /v2/sister/weapons）。
-func (api *MarketAPI) FetchLichSisterWeapons() ([][]json.RawMessage, error) {
-	urls := []string{
-		marketBaseURL + "/v2/lich/weapons",
-		marketBaseURL + "/v2/sister/weapons",
+// marketEntry 市场条目通用反序列化结构（对齐 Java 各 Service 的 build* 方法）：
+// 顶层字段 + i18n.zh-hans 嵌套（name/icon/thumb）。
+type marketEntry struct {
+	ID             string  `json:"id"`
+	Slug           string  `json:"slug"`
+	GameRef        string  `json:"gameRef"`
+	Group          string  `json:"group"`
+	RivenType      string  `json:"rivenType"`
+	Disposition    float64 `json:"disposition"`
+	ReqMasteryRank int     `json:"reqMasteryRank"`
+	BulkTradable   bool    `json:"bulkTradable"`
+	MaxRank        int     `json:"maxRank"`
+	Ducats         int     `json:"ducats"`
+	Vaulted        bool    `json:"vaulted"`
+	MaxAmberStars  int     `json:"maxAmberStars"`
+	MaxCyanStars   int     `json:"maxCyanStars"`
+	BaseEndo       int     `json:"baseEndo"`
+	Animation      string  `json:"animation"`
+	Element        string  `json:"element"`
+	Name           string  `json:"-"`
+	Icon           string  `json:"-"`
+	Thumb          string  `json:"-"`
+
+	I18N marketI18N `json:"i18n"`
+}
+
+// marketI18N 市场条目的多语言嵌套结构。
+type marketI18N struct {
+	ZhHans marketI18NEntry `json:"zh-hans"`
+}
+
+// marketI18NEntry 单语言条目（name/icon/thumb）。
+type marketI18NEntry struct {
+	Name  string `json:"name"`
+	Icon  string `json:"icon"`
+	Thumb string `json:"thumb"`
+}
+
+// resolveI18n 从 i18n.zh-hans 填充 name/icon/thumb（name 缺失回退 slug，对齐 Java）。
+func (entry *marketEntry) resolveI18n() {
+	if entry.I18N.ZhHans.Name != "" {
+		entry.Name = entry.I18N.ZhHans.Name
+	} else {
+		entry.Name = entry.Slug
 	}
-	results := make([][]json.RawMessage, 0, 2)
+	entry.Icon = entry.I18N.ZhHans.Icon
+	entry.Thumb = entry.I18N.ZhHans.Thumb
+}
+
+// parseMarketItems 解析 items 原始数组为通用条目并回填 i18n。
+func parseMarketItems(rawItems []json.RawMessage) []marketEntry {
+	results := make([]marketEntry, 0, len(rawItems))
+	for _, raw := range rawItems {
+		var entry marketEntry
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			continue
+		}
+		entry.resolveI18n()
+		results = append(results, entry)
+	}
+	return results
+}
+
+// FetchItems 拉取 /v2/items 全量市场物品条目（对齐 OrdersItemsService.initOrdersItemsData）。
+func (api *MarketAPI) FetchItems() ([]marketEntry, error) {
+	rawItems, err := api.fetchItemsRaw(api.baseURL + "/v2/items")
+	if err != nil {
+		return nil, err
+	}
+	return parseMarketItems(rawItems), nil
+}
+
+// FetchRivenWeapons 拉取 /v2/riven/weapons 紫卡武器条目（对齐 RivenItemsService）。
+func (api *MarketAPI) FetchRivenWeapons() ([]marketEntry, error) {
+	rawItems, err := api.fetchItemsRaw(api.baseURL + "/v2/riven/weapons")
+	if err != nil {
+		return nil, err
+	}
+	return parseMarketItems(rawItems), nil
+}
+
+// FetchLichSisterWeapons 拉取赤毒/信条武器（/v2/lich/weapons + /v2/sister/weapons）。
+func (api *MarketAPI) FetchLichSisterWeapons() ([][]marketEntry, error) {
+	urls := []string{
+		api.baseURL + "/v2/lich/weapons",
+		api.baseURL + "/v2/sister/weapons",
+	}
+	results := make([][]marketEntry, 0, 2)
 	for _, url := range urls {
-		body, err := api.Get(url)
+		rawItems, err := api.fetchItemsRaw(url)
 		if err != nil {
 			return nil, err
 		}
-		var envelope marketPayload
-		if err := json.Unmarshal(body, &envelope); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", url, err)
-		}
-		results = append(results, envelope.Payload.Items)
+		results = append(results, parseMarketItems(rawItems))
 	}
 	return results, nil
 }
 
 // FetchLichSisterEphemeras 拉取赤毒/信条幻纹（/v2/lich/ephemeras + /v2/sister/ephemeras）。
-func (api *MarketAPI) FetchLichSisterEphemeras() ([][]json.RawMessage, error) {
+func (api *MarketAPI) FetchLichSisterEphemeras() ([][]marketEntry, error) {
 	urls := []string{
-		marketBaseURL + "/v2/lich/ephemeras",
-		marketBaseURL + "/v2/sister/ephemeras",
+		api.baseURL + "/v2/lich/ephemeras",
+		api.baseURL + "/v2/sister/ephemeras",
 	}
-	results := make([][]json.RawMessage, 0, 2)
+	results := make([][]marketEntry, 0, 2)
 	for _, url := range urls {
-		body, err := api.Get(url)
+		rawItems, err := api.fetchItemsRaw(url)
 		if err != nil {
 			return nil, err
 		}
-		var envelope marketPayload
-		if err := json.Unmarshal(body, &envelope); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", url, err)
-		}
-		results = append(results, envelope.Payload.Items)
+		results = append(results, parseMarketItems(rawItems))
 	}
 	return results, nil
 }
@@ -236,7 +273,7 @@ type DucatsOrder struct {
 
 // FetchDucats 拉取 /v1/tools/ducats 杜卡德币排行。
 func (api *MarketAPI) FetchDucats() ([]DucatsOrder, error) {
-	body, err := api.Get(marketBaseURL + "/v1/tools/ducats")
+	body, err := api.Get(api.baseURL + "/v1/tools/ducats")
 	if err != nil {
 		return nil, err
 	}

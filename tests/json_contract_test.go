@@ -2,10 +2,14 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	modelwarframe "nyxbot-go/internal/model/warframe"
+	"nyxbot-go/internal/warframe"
 )
 
 // TestModelJSONContract 验证关键模型 JSON 字段与前端契约对齐。
@@ -55,5 +59,32 @@ func TestModelJSONContract(t *testing.T) {
 		if string(got) != tc.want {
 			t.Fatalf("%s: %s = %s, want %s", tc.name, tc.key, string(got), tc.want)
 		}
+	}
+}
+
+// TestMarketEntryI18n 验证市场条目 i18n.zh-hans 嵌套解析（对齐 Java build* 方法）。
+func TestMarketEntryI18n(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"payload":{"items":[
+			{"id":"1","slug":"rhino_prime_set","gameRef":"Rhino Prime Set","bulkTradable":true,"i18n":{"zh-hans":{"name":"犀牛P","icon":"i1","thumb":"t1"}}},
+			{"id":"2","slug":"no_i18n","gameRef":"No I18n"}
+		]}}`)
+	}))
+	defer server.Close()
+
+	api := warframe.NewMarketAPIWithBaseURL(server.Client(), server.URL)
+	items, err := api.FetchItems()
+	if err != nil {
+		t.Fatalf("FetchItems failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].Name != "犀牛P" || items[0].Icon != "i1" || items[0].Thumb != "t1" || !items[0].BulkTradable {
+		t.Fatalf("i18n resolve mismatch: %+v", items[0])
+	}
+	if items[1].Name != "no_i18n" {
+		t.Fatalf("missing i18n should fallback to slug: %+v", items[1])
 	}
 }

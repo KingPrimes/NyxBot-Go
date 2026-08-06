@@ -59,7 +59,8 @@ func NewDataImporter(exporter *ExportFilePath, market *MarketAPI, db *gorm.DB) *
 }
 
 // ImportAll 执行完整启动导入（对齐 Java WarframeDataSource.init 顺序）：
-// 导出文件 → 状态翻译 → 其余表并行。任何一步失败不阻塞后续（对齐降级语义）。
+// 导出文件 → 状态翻译 → 其余表（市场 API 表 + 导出表 + CDN 表）。
+// 任何一步失败不阻塞后续（对齐 Java 降级语义）。
 func (importer *DataImporter) ImportAll(ctx context.Context) {
 	// Phase 0：下载导出文件（失败且无本地缓存则仅告警，不终止启动）
 	if _, err := importer.exporter.SeverExportFiles(ctx); err != nil {
@@ -71,11 +72,18 @@ func (importer *DataImporter) ImportAll(ctx context.Context) {
 		logging.WarnPack("warframe.import", "state translation import failed: %v", err)
 	}
 
-	// Phase 2：其余业务表
+	// Phase 2：其余业务表（对齐 Java Phase 1c 市场表 + Phase 2 导出/CDN 表）
 	steps := []struct {
 		name string
 		run  func(context.Context) error
 	}{
+		// 市场 API 表（Phase 1c 并行组）
+		{"orders-items", importer.UpdateOrdersItems},
+		{"riven-items", importer.UpdateRivenItems},
+		{"lich-sister-weapons", importer.UpdateLichSister},
+		{"ephemeras", importer.UpdateEphemeras},
+		{"reward-pool", importer.ImportRewardPool},
+		// 导出/CDN 表（Phase 2 并行组）
 		{"alias", importer.ImportAlias},
 		{"riven-tion", importer.ImportRivenTion},
 		{"riven-tion-alias", importer.ImportRivenTionAlias},
@@ -126,29 +134,15 @@ func (importer *DataImporter) importMarketItems() error {
 	return importer.db.Save(records).Error
 }
 
-// importRivenItems 导入紫卡武器（/v2/riven/weapons）。
+// importRivenItems 导入紫卡武器（/v2/riven/weapons），对齐 RivenItemsService。
 func (importer *DataImporter) importRivenItems() error {
 	rawItems, err := importer.market.FetchRivenWeapons()
 	if err != nil {
 		return err
 	}
 	records := make([]modelwarframe.RivenItem, 0, len(rawItems))
-	for _, raw := range rawItems {
-		var item struct {
-			ID             string  `json:"id"`
-			Slug           string  `json:"url_name"`
-			GameRef        string  `json:"item_name"`
-			Group          string  `json:"group"`
-			RivenType      string  `json:"riven_type"`
-			Disposition    float64 `json:"disposition"`
-			ReqMasteryRank int     `json:"mastery_rank"`
-			Icon           string  `json:"icon"`
-			Thumb          string  `json:"thumb"`
-		}
-		if err := json.Unmarshal(raw, &item); err != nil {
-			continue
-		}
-		if item.ID == "" || item.Slug == "" || item.GameRef == "" {
+	for _, item := range rawItems {
+		if item.ID == "" || item.Slug == "" || item.GameRef == "" || item.Group == "" {
 			continue
 		}
 		records = append(records, modelwarframe.RivenItem{
@@ -159,7 +153,7 @@ func (importer *DataImporter) importRivenItems() error {
 			RivenType:      item.RivenType,
 			Disposition:    item.Disposition,
 			ReqMasteryRank: item.ReqMasteryRank,
-			Name:           item.GameRef,
+			Name:           item.Name,
 			Icon:           item.Icon,
 			Thumb:          item.Thumb,
 		})
@@ -170,7 +164,7 @@ func (importer *DataImporter) importRivenItems() error {
 	return importer.db.Save(records).Error
 }
 
-// importLichSisterWeapons 导入赤毒/信条武器（双端点）。
+// importLichSisterWeapons 导入赤毒/信条武器（双端点），对齐 LichSisterWeaponsService。
 func (importer *DataImporter) importLichSisterWeapons() error {
 	groups, err := importer.market.FetchLichSisterWeapons()
 	if err != nil {
@@ -178,18 +172,7 @@ func (importer *DataImporter) importLichSisterWeapons() error {
 	}
 	records := make([]modelwarframe.LichSisterWeapon, 0)
 	for _, group := range groups {
-		for _, raw := range group {
-			var item struct {
-				ID             string `json:"id"`
-				Slug           string `json:"url_name"`
-				GameRef        string `json:"item_name"`
-				ReqMasteryRank int    `json:"mastery_rank"`
-				Icon           string `json:"icon"`
-				Thumb          string `json:"thumb"`
-			}
-			if err := json.Unmarshal(raw, &item); err != nil {
-				continue
-			}
+		for _, item := range group {
 			if item.ID == "" || item.Slug == "" || item.GameRef == "" {
 				continue
 			}
@@ -198,7 +181,7 @@ func (importer *DataImporter) importLichSisterWeapons() error {
 				Slug:           item.Slug,
 				GameRef:        item.GameRef,
 				ReqMasteryRank: item.ReqMasteryRank,
-				Name:           item.GameRef,
+				Name:           item.Name,
 				Icon:           item.Icon,
 				Thumb:          item.Thumb,
 			})
@@ -210,7 +193,7 @@ func (importer *DataImporter) importLichSisterWeapons() error {
 	return importer.db.Save(records).Error
 }
 
-// importEphemeras 导入赤毒/信条幻纹（双端点）。
+// importEphemeras 导入赤毒/信条幻纹（双端点），对齐 EphemerasService。
 func (importer *DataImporter) importEphemeras() error {
 	groups, err := importer.market.FetchLichSisterEphemeras()
 	if err != nil {
@@ -218,19 +201,7 @@ func (importer *DataImporter) importEphemeras() error {
 	}
 	records := make([]modelwarframe.Ephemera, 0)
 	for _, group := range groups {
-		for _, raw := range group {
-			var item struct {
-				ID        string `json:"id"`
-				Slug      string `json:"url_name"`
-				GameRef   string `json:"item_name"`
-				Animation string `json:"animation"`
-				Element   string `json:"element"`
-				Icon      string `json:"icon"`
-				Thumb     string `json:"thumb"`
-			}
-			if err := json.Unmarshal(raw, &item); err != nil {
-				continue
-			}
+		for _, item := range group {
 			if item.ID == "" {
 				continue
 			}
@@ -240,7 +211,7 @@ func (importer *DataImporter) importEphemeras() error {
 				GameRef:   item.GameRef,
 				Animation: item.Animation,
 				Element:   item.Element,
-				Name:      item.GameRef,
+				Name:      item.Name,
 				Icon:      item.Icon,
 				Thumb:     item.Thumb,
 			})
