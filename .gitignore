@@ -17,3 +17,5 @@ plans/
 
 # 测试生成的图片临时目录
 /temp/
+
+/.workflow/
