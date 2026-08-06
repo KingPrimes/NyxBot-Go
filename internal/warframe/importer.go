@@ -133,6 +133,29 @@ func (number flexibleNumber) Float64() float64 {
 	return float64(number)
 }
 
+// importBatchSize 分批写入条数。SQLite 单条 SQL 绑定变量有上限（32766），
+// 按最大字段数（Weapons 24 字段）保守取值，500 条 × 24 = 12000 不会触限。
+const importBatchSize = 500
+
+// batchSave 分批执行 Save，规避 SQLite "too many SQL variables" 错误。
+// fullAssociations 为 true 时携带关联保存（对齐 FullSaveAssociations 语义）。
+func batchSave[T any](db *gorm.DB, records []T, fullAssociations bool) error {
+	for start := 0; start < len(records); start += importBatchSize {
+		end := start + importBatchSize
+		if end > len(records) {
+			end = len(records)
+		}
+		session := db
+		if fullAssociations {
+			session = db.Session(&gorm.Session{FullSaveAssociations: true})
+		}
+		if err := session.Save(records[start:end]).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // rarityNameToOrdinal CDN rarity 字符串枚举名 → RarityEnum ORDINAL（对齐 model 包映射）。
 func rarityNameToOrdinal(name string) int {
 	switch name {
@@ -146,6 +169,32 @@ func rarityNameToOrdinal(name string) int {
 		return 3
 	default:
 		return 0
+	}
+}
+
+// productCategoryNameToOrdinal ProductCategory 枚举名 → ORDINAL（对齐 model 包映射，未知回退 LongGuns(1)）。
+func productCategoryNameToOrdinal(name string) int {
+	switch name {
+	case "Pistols":
+		return 0
+	case "LongGuns":
+		return 1
+	case "Melee":
+		return 2
+	case "SpaceGuns":
+		return 3
+	case "SpaceMelee":
+		return 4
+	case "SpecialItems":
+		return 5
+	case "CrewShipWeapons":
+		return 6
+	case "SentinelWeapons":
+		return 7
+	case "Shotguns":
+		return 8
+	default:
+		return 1
 	}
 }
 
@@ -179,7 +228,7 @@ func (importer *DataImporter) importMarketItems() error {
 	if len(records) == 0 {
 		return fmt.Errorf("market /v2/items returned no valid records")
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // importRivenItems 导入紫卡武器（/v2/riven/weapons），对齐 RivenItemsService。
@@ -209,7 +258,7 @@ func (importer *DataImporter) importRivenItems() error {
 	if len(records) == 0 {
 		return fmt.Errorf("market /v2/riven/weapons returned no valid records")
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // importLichSisterWeapons 导入赤毒/信条武器（双端点），对齐 LichSisterWeaponsService。
@@ -238,7 +287,7 @@ func (importer *DataImporter) importLichSisterWeapons() error {
 	if len(records) == 0 {
 		return fmt.Errorf("market lich/sister weapons returned no valid records")
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // importEphemeras 导入赤毒/信条幻纹（双端点），对齐 EphemerasService。
@@ -268,7 +317,7 @@ func (importer *DataImporter) importEphemeras() error {
 	if len(records) == 0 {
 		return fmt.Errorf("market lich/sister ephemeras returned no valid records")
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // ImportStateTranslation 从导出文件导入状态翻译（Phase 1）。
@@ -340,7 +389,7 @@ func (importer *DataImporter) ImportStateTranslation(_ context.Context) error {
 	if len(records) == 0 {
 		return fmt.Errorf("no state translation records from export files")
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // stateTypeNameToOrdinal 构建 StateType 枚举名 -> 序数映射（对齐 Java 枚举声明顺序）。
@@ -476,7 +525,7 @@ func (importer *DataImporter) ImportAlias(_ context.Context) error {
 			Cn: record.Cn,
 		})
 	}
-	return importer.db.Save(upserts).Error
+	return batchSave(importer.db, upserts, false)
 }
 
 // ImportRivenTion 从 CDN market_riven_tion.json 导入（按 urlName 业务键智能更新）。
@@ -524,7 +573,7 @@ func (importer *DataImporter) ImportRivenTion(_ context.Context) error {
 			ExclusiveTo:        record.ExclusiveTo,
 		})
 	}
-	return importer.db.Save(upserts).Error
+	return batchSave(importer.db, upserts, false)
 }
 
 // ImportRivenTionAlias 从 CDN market_riven_tion_alias.json 导入（按 en|cn 组合键）。
@@ -555,7 +604,7 @@ func (importer *DataImporter) ImportRivenTionAlias(_ context.Context) error {
 			Cn: record.Cn,
 		})
 	}
-	return importer.db.Save(upserts).Error
+	return batchSave(importer.db, upserts, false)
 }
 
 // ImportRivenAnalyseTrend 从 ExportUpgrades 本地计算（对齐 RivenTrendGenerator）。
@@ -610,7 +659,7 @@ func (importer *DataImporter) ImportNodes(_ context.Context) error {
 			MaxEnemyLevel: entry.MaxEnemyLevel,
 		})
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // ImportWeapons 从 ExportWeapons 导入武器。
@@ -628,14 +677,14 @@ func (importer *DataImporter) ImportWeapons(_ context.Context) error {
 		Name               string    `json:"name"`
 		CodexSecret        bool      `json:"codexSecret"`
 		DamagePerShot      []float64 `json:"damagePerShot"`
-		TotalDamage        int       `json:"totalDamage"`
+		TotalDamage        float64   `json:"totalDamage"` // 真实数据含浮点（如 45.999996），入库截断对齐 Java
 		Description        string    `json:"description"`
 		CriticalChance     float64   `json:"criticalChance"`
 		CriticalMultiplier float64   `json:"criticalMultiplier"`
 		ProcChance         float64   `json:"procChance"`
 		FireRate           float64   `json:"fireRate"`
 		MasteryReq         int       `json:"masteryReq"`
-		ProductCategory    int       `json:"productCategory"`
+		ProductCategory    string    `json:"productCategory"` // 枚举名（如 "Pistols"），入库转 ORDINAL
 		Slot               int       `json:"slot"`
 		Accuracy           float64   `json:"accuracy"`
 		OmegaAttenuation   float64   `json:"omegaAttenuation"`
@@ -661,7 +710,7 @@ func (importer *DataImporter) ImportWeapons(_ context.Context) error {
 			Name:               entry.Name,
 			CodexSecret:        entry.CodexSecret,
 			DamagePerShot:      string(damageJSON),
-			TotalDamage:        entry.TotalDamage,
+			TotalDamage:        int(entry.TotalDamage),
 			Description:        entry.Description,
 			EnglishName:        extractEnglishName(entry.Description),
 			CriticalChance:     entry.CriticalChance,
@@ -669,7 +718,7 @@ func (importer *DataImporter) ImportWeapons(_ context.Context) error {
 			ProcChance:         entry.ProcChance,
 			FireRate:           entry.FireRate,
 			MasteryReq:         entry.MasteryReq,
-			ProductCategory:    entry.ProductCategory,
+			ProductCategory:    productCategoryNameToOrdinal(entry.ProductCategory),
 			Slot:               entry.Slot,
 			Accuracy:           entry.Accuracy,
 			OmegaAttenuation:   entry.OmegaAttenuation,
@@ -682,7 +731,7 @@ func (importer *DataImporter) ImportWeapons(_ context.Context) error {
 			Multishot:          entry.Multishot,
 		})
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // ImportNightWave 从 ExportSortieRewards 的 ExportNightwave.challenges 导入电波。
@@ -721,7 +770,7 @@ func (importer *DataImporter) ImportNightWave(_ context.Context) error {
 			Required:    entry.Required,
 		})
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // ImportWarframes 从 ExportWarframes 导入战甲（含技能级联）。
@@ -746,7 +795,7 @@ func (importer *DataImporter) ImportWarframes(_ context.Context) error {
 		Power           int    `json:"power"`
 		CodexSecret     bool   `json:"codexSecret"`
 		MasteryReq      int    `json:"masteryReq"`
-		SprintSpeed     int    `json:"sprintSpeed"`
+		SprintSpeed     float64 `json:"sprintSpeed"` // 真实数据含浮点（如 1.1），入库截断对齐 Java
 		ProductCategory string `json:"productCategory"`
 		Abilities       []struct {
 			AbilityUniqueName string `json:"abilityUniqueName"`
@@ -786,12 +835,12 @@ func (importer *DataImporter) ImportWarframes(_ context.Context) error {
 			Power:           entry.Power,
 			CodexSecret:     entry.CodexSecret,
 			MasteryReq:      entry.MasteryReq,
-			SprintSpeed:     entry.SprintSpeed,
+			SprintSpeed:     int(entry.SprintSpeed),
 			ProductCategory: entry.ProductCategory,
 			Abilities:       abilities,
 		})
 	}
-	return importer.db.Session(&gorm.Session{FullSaveAssociations: true}).Save(records).Error
+	return batchSave(importer.db, records, true)
 }
 
 // ImportRelics 从 ExportRelicArcane 导入遗物（按 name 去重 + 翻译奖励名）。
@@ -812,7 +861,7 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 		Rewards     []struct {
 			ID         string `json:"id"`
 			RewardName string `json:"rewardName"`
-			Rarity     int    `json:"rarity"`
+			Rarity     string `json:"rarity"` // 枚举名（如 "COMMON"），入库转 ORDINAL
 			Tier       int    `json:"tier"`
 			ItemCount  int    `json:"itemCount"`
 		} `json:"relicRewards"`
@@ -839,7 +888,7 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 				ID:         id,
 				RelicsID:   entry.UniqueName,
 				RewardName: reward.RewardName,
-				Rarity:     reward.Rarity,
+				Rarity:     rarityNameToOrdinal(reward.Rarity),
 				Tier:       reward.Tier,
 				ItemCount:  reward.ItemCount,
 			})
@@ -852,7 +901,7 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 			RelicRewards: rewards,
 		})
 	}
-	return importer.db.Session(&gorm.Session{FullSaveAssociations: true}).Save(records).Error
+	return batchSave(importer.db, records, true)
 }
 
 // ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 运行时替换）。
@@ -899,7 +948,7 @@ func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 			Rewards:    rewards,
 		})
 	}
-	return importer.db.Session(&gorm.Session{FullSaveAssociations: true}).Save(pools).Error
+	return batchSave(importer.db, pools, true)
 }
 
 // UpdateOrdersItems 更新市场物品数据（对应 POST /data/warframe/market/update）。
@@ -1051,7 +1100,7 @@ func (importer *DataImporter) computeRivenTrend(raw []byte) error {
 			Archwing: acc.archwing,
 		})
 	}
-	return importer.db.Save(records).Error
+	return batchSave(importer.db, records, false)
 }
 
 // detectWeaponCategory 识别武器类别（对齐 RivenTrendGenerator 的 uniqueName 规则）。

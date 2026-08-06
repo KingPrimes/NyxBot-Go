@@ -24,11 +24,12 @@ import (
 
 const (
 	exportIndexURL = "https://origin.warframe.com/PublicExport/index_%s.txt.lzma" // LZMA 索引
-	exportFileURL  = "http://content.warframe.com/PublicExport/Manifest/%s"       // 文件下载（http，对齐 Java）
-	exportDir      = "./data/export"                                              // 导出文件目录
-	exportKeysFile = "./data/keys.json"                                           // 文件名 -> hash 映射
-	exportLzmaDir  = "./data/lzma"                                                // LZMA 索引目录
-	exportDataURL  = "http://content.warframe.com/PublicExport/%s"                // 通用导出 URL（备用）
+	// 文件下载需携带索引中的 hash 后缀（文件名!hash，对齐 Java ExportFilePath.getExportFiles）
+	exportFileURL  = "https://content.warframe.com/PublicExport/Manifest/%s!%s" // 文件下载
+	exportDir      = "./data/export"                                            // 导出文件目录
+	exportKeysFile = "./data/keys.json"                                         // 文件名 -> hash 映射
+	exportLzmaDir  = "./data/lzma"                                              // LZMA 索引目录
+	exportDataURL  = "http://content.warframe.com/PublicExport/%s"              // 通用导出 URL（备用）
 )
 
 // ExportFilePath 管理导出文件索引与下载。
@@ -51,6 +52,7 @@ func NewExportFilePath(client *http.Client, locale string) *ExportFilePath {
 // SeverExportFiles 执行一次导出文件同步（对齐 Java severExportFiles）：
 // 下载索引 → 对比 hash → 下载变化文件；无变化返回 nil，全部成功返回 nil。
 // 返回 changed 表示是否发生了文件更新。
+// 注意：keys.json 仅在全部文件就绪后写入，下载失败不落盘，保证下次启动可重试。
 func (exporter *ExportFilePath) SeverExportFiles(ctx context.Context) (bool, error) {
 	index, err := exporter.fetchAndParseIndex(ctx)
 	if err != nil {
@@ -60,25 +62,37 @@ func (exporter *ExportFilePath) SeverExportFiles(ctx context.Context) (bool, err
 		return false, err
 	}
 
-	changed, err := exporter.saveKeysAndDiff(index)
-	if err != nil {
-		return false, err
-	}
+	changed := exporter.diffWithIndex(index)
+	// hash 无变化但本地文件缺失（如首次下载失败后 keys.json 已写入的场景），补齐缺失文件
 	if len(changed) == 0 {
-		return false, nil
+		for filename := range index {
+			if strings.Contains(filename, "ExportRecipes") || strings.Contains(filename, "ExportFusionBundles") {
+				continue
+			}
+			if _, statErr := os.Stat(filepath.Join(exportDir, filename)); statErr != nil {
+				changed = append(changed, filename)
+			}
+		}
+		sort.Strings(changed)
+		if len(changed) == 0 {
+			return false, nil
+		}
 	}
 
 	for _, filename := range changed {
 		if strings.Contains(filename, "ExportRecipes") || strings.Contains(filename, "ExportFusionBundles") {
 			continue
 		}
-		if err := exporter.downloadFile(ctx, filename); err != nil {
+		if err := exporter.downloadFile(ctx, filename, index[filename]); err != nil {
 			logging.WarnPack("warframe.export", "export file %s download failed: %v", filename, err)
 			if exporter.localCacheExists() {
 				continue
 			}
 			return false, err
 		}
+	}
+	if err := exporter.saveKeys(index); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -136,8 +150,8 @@ func parseIndexLines(plain []byte) map[string]string {
 	return result
 }
 
-// saveKeysAndDiff 写回 keys.json 并返回 hash 有变化的文件名集合。
-func (exporter *ExportFilePath) saveKeysAndDiff(index map[string]string) ([]string, error) {
+// diffWithIndex 对比本地 keys.json 与最新索引，返回 hash 有变化的文件名集合（排序）。
+func (exporter *ExportFilePath) diffWithIndex(index map[string]string) []string {
 	old := loadKeys()
 	changed := make([]string, 0)
 	for filename, hash := range index {
@@ -146,18 +160,19 @@ func (exporter *ExportFilePath) saveKeysAndDiff(index map[string]string) ([]stri
 		}
 	}
 	sort.Strings(changed)
+	return changed
+}
 
+// saveKeys 将索引写回 keys.json。
+func (exporter *ExportFilePath) saveKeys(index map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(exportKeysFile), 0o755); err != nil {
-		return nil, err
+		return err
 	}
 	encoded, err := json.Marshal(index)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := os.WriteFile(exportKeysFile, encoded, 0o644); err != nil {
-		return nil, err
-	}
-	return changed, nil
+	return os.WriteFile(exportKeysFile, encoded, 0o644)
 }
 
 // loadKeys 读取 keys.json；不存在返回空映射。
@@ -174,11 +189,12 @@ func loadKeys() map[string]string {
 }
 
 // downloadFile 下载单个导出文件到 ./data/export/（带网络重试）。
-func (exporter *ExportFilePath) downloadFile(ctx context.Context, filename string) error {
+// hash 为索引中的版本 hash，URL 需拼接为 "文件名!hash"（对齐 Java，缺 hash 会 404）。
+func (exporter *ExportFilePath) downloadFile(ctx context.Context, filename, hash string) error {
 	if err := os.MkdirAll(exportDir, 0o755); err != nil {
 		return err
 	}
-	url := fmt.Sprintf(exportFileURL, filename)
+	url := fmt.Sprintf(exportFileURL, filename, hash)
 	body, err := doRequestWithRetry(ctx, exporter.client, http.MethodGet, url, nil)
 	if err != nil {
 		return err
