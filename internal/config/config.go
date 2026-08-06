@@ -69,7 +69,6 @@ type BotConfig struct {
 	AccessToken  string `yaml:"access_token" comment:"OneBot 鉴权令牌"`                                     // OneBot 鉴权令牌，对应 ZeroBot driver 的 accessToken 参数
 	WaitN        int    `yaml:"wait_n" comment:"反向 WS 并发等待数"`                                           // 反向 WS 并发等待数，对应 driver.NewWebSocketServer 的 waitn 参数
 	PluginPrefix bool   `yaml:"plugin_prefix" comment:"是否使用艾特触发指令"`                                     // 是否使用艾特触发指令（NyxBot 业务语义）
-	PluginName   string `yaml:"plugin_name" comment:"当前选中的绘图插件名称"`                                      // 当前选中的绘图插件名称
 }
 
 // AuthConfig 认证鉴权配置。
@@ -314,15 +313,14 @@ func defaultConfig() Config {
 			AccessToken:  "",
 			WaitN:        16,
 			PluginPrefix: false,
-			PluginName:   "",
 		},
 		Auth: AuthConfig{
 			JwtSecret: "",
 		},
 		Warframe: WarframeConfig{
-			HTTPRetryAttempts:         3, // 3 次尝试（含首次），网络抖动自动重试
-			HTTPRetryBaseWaitSeconds:  1, // 首次重试等待 1 秒，之后 2s → 4s 指数退避
-			HTTPRetryTimeoutSeconds:   15, // 单次请求 15 秒超时
+			HTTPRetryAttempts:        3,  // 3 次尝试（含首次），网络抖动自动重试
+			HTTPRetryBaseWaitSeconds: 1,  // 首次重试等待 1 秒，之后 2s → 4s 指数退避
+			HTTPRetryTimeoutSeconds:  15, // 单次请求 15 秒超时
 		},
 	}
 }

@@ -43,13 +43,11 @@ bot:
   wait_n: 16
   # 是否使用艾特触发指令
   plugin_prefix: false
-  # 当前选中的绘图插件名称
-  plugin_name: ""
 
 # 认证鉴权配置
 auth:
   # JWT 签名密钥（首次启动时随机生成，请勿泄露）
-  jwt_secret: acc8c22b522e9f7f6103adfacc3336f21dd067bb91d8f367c209bdf24d080d96
+  jwt_secret: 1560588c0190dd14adf7db093441f83a57601ebf43c741e4eacf7a32325314a4
 
 # Warframe 数据层配置
 warframe:

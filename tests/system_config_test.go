@@ -105,12 +105,14 @@ func TestGetLoadingConfigReturnsDefaults(t *testing.T) {
 		"wsClientUrl":      "ws://localhost:3001",
 		"token":            "",
 		"pluginPrefix":     false,
-		"pluginName":       "",
 	}
 	for key, want := range expects {
 		if got, ok := data[key]; !ok || got != want {
 			t.Fatalf("field %s: expected %v (present=%v), got %v", key, want, ok, got)
 		}
+	}
+	if _, ok := data["pluginName"]; ok {
+		t.Fatal("pluginName should be removed from loading config (plugin system not implemented)")
 	}
 }
 
@@ -129,7 +131,7 @@ func TestSaveLoadingConfigMergesAndPersists(t *testing.T) {
 		t.Fatalf("expected body code 200, got %d", code)
 	}
 
-	// 接口读回
+	// 接口读回（pluginName 已移除，POST 夹带时静默忽略，读回不含该字段）
 	_, data := decodeData(t, doRequest(t, r, http.MethodGet, "/config/loading", token, ""))
 	expects := map[string]any{
 		"serverPort":       float64(9090),
@@ -138,12 +140,14 @@ func TestSaveLoadingConfigMergesAndPersists(t *testing.T) {
 		"wsServerUrl":      "/ws/onebot",
 		"token":            "abc123",
 		"pluginPrefix":     true,
-		"pluginName":       "draw-core",
 	}
 	for key, want := range expects {
 		if got := data[key]; got != want {
 			t.Fatalf("field %s: expected %v, got %v", key, want, got)
 		}
+	}
+	if _, ok := data["pluginName"]; ok {
+		t.Fatal("pluginName should not be persisted (plugin system not implemented)")
 	}
 
 	// 运行时内存热更新（存储侧为 ZeroBot 参数语义）

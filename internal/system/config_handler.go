@@ -20,7 +20,6 @@ type LoadingConfig struct {
 	WsServerURL      string `json:"wsServerUrl"`      // 反向 WebSocket 路径
 	Token            string `json:"token"`            // OneBot 连接令牌（accessToken）
 	PluginPrefix     bool   `json:"pluginPrefix"`     // 是否使用艾特触发指令
-	PluginName       string `json:"pluginName"`       // 当前选中的绘图插件名称
 }
 
 // loadingConfigUpdate 保存系统配置的请求体。
@@ -33,7 +32,6 @@ type loadingConfigUpdate struct {
 	WsServerURL      *string `json:"wsServerUrl"`
 	Token            *string `json:"token"`
 	PluginPrefix     *bool   `json:"pluginPrefix"`
-	PluginName       *string `json:"pluginName"`
 }
 
 var (
@@ -104,7 +102,6 @@ func loadingConfigFromConfig(cfg config.Config) LoadingConfig {
 		WsServerURL:      cfg.Bot.WsServerPath,
 		Token:            cfg.Bot.AccessToken,
 		PluginPrefix:     cfg.Bot.PluginPrefix,
-		PluginName:       cfg.Bot.PluginName,
 	}
 }
 
@@ -131,8 +128,5 @@ func (u *loadingConfigUpdate) applyTo(cfg *config.Config) {
 	}
 	if u.PluginPrefix != nil {
 		cfg.Bot.PluginPrefix = *u.PluginPrefix
-	}
-	if u.PluginName != nil {
-		cfg.Bot.PluginName = *u.PluginName
 	}
 }
