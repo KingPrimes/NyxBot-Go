@@ -56,6 +56,12 @@ func main() {
 	defer stop()
 
 	// Warframe 数据层（阶段 8）：导出文件下载器 + 市场 API + 导入器 + 更新器 + HTTP 接口
+	// 重试参数从 config.yaml 的 warframe 块读取（网络错误自动重试，指数退避）
+	warframe.SetRetryConfig(
+		cfg.Warframe.HTTPRetryAttempts,
+		cfg.Warframe.HTTPRetryBaseWaitSeconds,
+		cfg.Warframe.HTTPRetryTimeoutSeconds,
+	)
 	exportClient := &http.Client{Timeout: 30 * time.Second}
 	exporter := warframe.NewExportFilePath(exportClient, "zh")
 	marketAPI := warframe.NewMarketAPI(exportClient)

@@ -7,11 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -1131,7 +1131,7 @@ func nonPercentStat(name string) bool {
 }
 
 // cdnFetchFile 从 KingPrimes/DataSource 多 CDN 拉取文件（对齐 CdnTagResolver + ApiDataSourceUtils）。
-// 拉取标签（失败回退 latest）→ 依次尝试 CDN，首个 2xx 且 JSON 解析成功者胜。
+// 拉取标签（失败回退 latest）→ 依次尝试 CDN（每个带网络重试），首个 2xx 且 JSON 解析成功者胜。
 func cdnFetchFile(path string) ([]byte, error) {
 	tag, err := fetchLatestDataSourceTag()
 	if err != nil {
@@ -1174,30 +1174,10 @@ func fetchLatestDataSourceTag() (string, error) {
 	return tags[0].Name, nil
 }
 
-// httpGetBytes 发起简单 GET 请求并读取响应体。
+// httpGetBytes 发起带重试的 GET 请求并读取响应体（网络错误与 429/5xx 重试 3 次）。
 func httpGetBytes(url string) ([]byte, error) {
-	client := &http.Client{}
-	response, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d from %s", response.StatusCode, url)
-	}
-	body := make([]byte, 0)
-	buffer := make([]byte, 4096)
-	for {
-		n, readErr := response.Body.Read(buffer)
-		body = append(body, buffer[:n]...)
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return nil, readErr
-		}
-	}
-	return body, nil
+	client := &http.Client{Timeout: 15 * time.Second}
+	return doRequestWithRetry(context.Background(), client, http.MethodGet, url, nil)
 }
 
 // init 校验 package 级一致性。

@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,9 +17,6 @@ import (
 
 // marketBaseURL warframe.market API 根地址。
 const marketBaseURL = "https://api.warframe.market"
-
-// marketTimeout 单次市场 API 请求超时。
-const marketTimeout = 15 * time.Second
 
 // MarketAPI 封装 warframe.market 的 HTTP 请求与进程内缓存。
 // 对齐 Java HttpUtils.marketSendGet 的 120s 缓存语义（按 URL 缓存）。
@@ -84,36 +80,20 @@ func (api *MarketAPI) Invalidate() {
 	api.mu.Unlock()
 }
 
-// doGet 执行实际请求，请求头对齐 Java marketSendGet（Language/Platform/Crossplay）。
+// doGet 执行实际请求（带网络重试），请求头对齐 Java marketSendGet（Language/Platform/Crossplay）。
+// 网络错误（TLS 超时等）与 429/5xx 自动重试 3 次，指数退避。
 func (api *MarketAPI) doGet(url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), marketTimeout)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Accept":          "application/json",
+		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+		"Language":        "zh-hans",
+		"Platform":        "pc",
+		"Pragma":          "no-cache",
+		"Crossplay":       "true",
 	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	request.Header.Set("Language", "zh-hans")
-	request.Header.Set("Platform", "pc")
-	request.Header.Set("Pragma", "no-cache")
-	request.Header.Set("Crossplay", "true")
-
-	response, err := api.client.Do(request)
+	body, err := doRequestWithRetry(context.Background(), api.client, http.MethodGet, url, headers)
 	if err != nil {
 		return nil, fmt.Errorf("market request failed: %w", err)
-	}
-	defer response.Body.Close()
-
-	switch {
-	case response.StatusCode == http.StatusTooManyRequests:
-		return nil, fmt.Errorf("market API rate limited (HTTP 429)，请稍后重试")
-	case response.StatusCode < 200 || response.StatusCode >= 400:
-		return nil, fmt.Errorf("market API returned HTTP %d", response.StatusCode)
-	}
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read market response: %w", err)
 	}
 	return body, nil
 }

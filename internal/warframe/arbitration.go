@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -223,24 +222,13 @@ func (cache *ArbitrationCache) persistToFile(list []Arbitration) error {
 }
 
 // fetchArbitrations 从远程 API 拉取仲裁列表（对齐 Java ApiUrl.arbitrationPreList）。
+// 网络错误与 429/5xx 自动重试 3 次（指数退避）。
 func fetchArbitrations(client *http.Client) ([]Arbitration, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, arbitrationURL, nil)
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"User-Agent": fmt.Sprintf("NyxBot/%s", userAgentVersion()),
+		"Accept":     "application/json",
 	}
-	request.Header.Set("User-Agent", fmt.Sprintf("NyxBot/%s", userAgentVersion()))
-	request.Header.Set("Accept", "application/json")
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 400 {
-		return nil, fmt.Errorf("arbitration API returned HTTP %d", response.StatusCode)
-	}
-	body, err := io.ReadAll(response.Body)
+	body, err := doRequestWithRetry(context.Background(), client, http.MethodGet, arbitrationURL, headers)
 	if err != nil {
 		return nil, err
 	}

@@ -15,7 +15,7 @@ import (
 	"nyxbot-go/internal/logging"
 )
 
-// Config 顶层应用配置，包含 Server、Database、Log、Bot、Auth 五个子配置项。
+// Config 顶层应用配置，包含 Server、Database、Log、Bot、Auth、Warframe 六个子配置项。
 // 各字段的 comment 标签是生成 config.yaml 时写入对应条目头注释的文本，
 // 新增字段必须同步填写 comment 标签，否则生成的配置文件缺少注释。
 type Config struct {
@@ -24,6 +24,7 @@ type Config struct {
 	Log      LogConfig      `yaml:"log" comment:"日志系统配置"`
 	Bot      BotConfig      `yaml:"bot" comment:"OneBot 连接配置"`
 	Auth     AuthConfig     `yaml:"auth" comment:"认证鉴权配置"`
+	Warframe WarframeConfig `yaml:"warframe" comment:"Warframe 数据层配置"`
 }
 
 // ServerConfig HTTP 服务器配置。
@@ -74,6 +75,18 @@ type BotConfig struct {
 // AuthConfig 认证鉴权配置。
 type AuthConfig struct {
 	JwtSecret string `yaml:"jwt_secret" comment:"JWT 签名密钥（首次启动时随机生成，请勿泄露）"` // JWT 签名密钥，首启随机生成
+}
+
+// WarframeConfig Warframe 数据层配置：远程数据源的 HTTP 请求重试参数。
+// 覆盖 worldState.php / 仲裁 / warframe.market / 官方导出 / CDN 数据源，
+// 网络错误（TLS 握手超时、连接拒绝等）与 HTTP 429/5xx 会按次数自动重试，指数退避。
+type WarframeConfig struct {
+	// HTTPRetryAttempts 单个请求的最大尝试次数（含首次，1 表示不重试）。
+	HTTPRetryAttempts int `yaml:"http_retry_attempts" comment:"远程数据源请求重试次数（含首次，1=不重试）"`
+	// HTTPRetryBaseWaitSeconds 首次重试前的等待秒数，之后按 2 的幂指数退避。
+	HTTPRetryBaseWaitSeconds int `yaml:"http_retry_base_wait_seconds" comment:"首次重试等待秒数（指数退避基准）"`
+	// HTTPRetryTimeoutSeconds 单次请求超时秒数。
+	HTTPRetryTimeoutSeconds int `yaml:"http_retry_timeout_seconds" comment:"单次请求超时秒数"`
 }
 
 // listenHost 监听主机地址，固定为本机地址（0.0.0.0 表示监听全部网卡），不开放配置项。
@@ -305,6 +318,11 @@ func defaultConfig() Config {
 		},
 		Auth: AuthConfig{
 			JwtSecret: "",
+		},
+		Warframe: WarframeConfig{
+			HTTPRetryAttempts:         3, // 3 次尝试（含首次），网络抖动自动重试
+			HTTPRetryBaseWaitSeconds:  1, // 首次重试等待 1 秒，之后 2s → 4s 指数退避
+			HTTPRetryTimeoutSeconds:   15, // 单次请求 15 秒超时
 		},
 	}
 }

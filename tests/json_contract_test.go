@@ -97,3 +97,49 @@ func TestMarketEntryI18n(t *testing.T) {
 		t.Fatalf("expected 2 riven weapons, got %d", len(rivenItems))
 	}
 }
+
+// TestHTTPRetry 验证网络错误自动重试（服务器前两次返回 500，第三次成功）。
+func TestHTTPRetry(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts < 3 {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"apiVersion":"0.25.0","data":[]}`)
+	}))
+	defer server.Close()
+
+	api := warframe.NewMarketAPIWithBaseURL(server.Client(), server.URL)
+	items, err := api.FetchItems()
+	if err != nil {
+		t.Fatalf("FetchItems should succeed after retries: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", attempts)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected empty items, got %d", len(items))
+	}
+}
+
+// TestHTTPRetryGivesUp 验证 4xx 不重试（业务错误直接失败）。
+func TestHTTPRetryGivesUp(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	api := warframe.NewMarketAPIWithBaseURL(server.Client(), server.URL)
+	_, err := api.FetchItems()
+	if err == nil {
+		t.Fatal("expected error for 400")
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt for 4xx, got %d", attempts)
+	}
+}

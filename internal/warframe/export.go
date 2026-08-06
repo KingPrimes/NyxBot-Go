@@ -83,7 +83,7 @@ func (exporter *ExportFilePath) SeverExportFiles(ctx context.Context) (bool, err
 	return true, nil
 }
 
-// fetchAndParseIndex 下载并解压 LZMA 索引，解析为 文件名 -> hash 映射。
+// fetchAndParseIndex 下载并解压 LZMA 索引（带网络重试），解析为 文件名 -> hash 映射。
 func (exporter *ExportFilePath) fetchAndParseIndex(ctx context.Context) (map[string]string, error) {
 	if err := os.MkdirAll(exportLzmaDir, 0o755); err != nil {
 		return nil, err
@@ -92,21 +92,9 @@ func (exporter *ExportFilePath) fetchAndParseIndex(ctx context.Context) (map[str
 	plainPath := filepath.Join(exportLzmaDir, fmt.Sprintf("index_%s.txt", exporter.locale))
 
 	url := fmt.Sprintf(exportIndexURL, exporter.locale)
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	response, err := exporter.client.Do(request)
+	compressed, err := doRequestWithRetry(ctx, exporter.client, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("download export index: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 400 {
-		return nil, fmt.Errorf("export index returned HTTP %d", response.StatusCode)
-	}
-	compressed, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read export index: %w", err)
 	}
 	if err := os.WriteFile(lzmaPath, compressed, 0o644); err != nil {
 		return nil, err
@@ -185,39 +173,20 @@ func loadKeys() map[string]string {
 	return result
 }
 
-// downloadFile 下载单个导出文件到 ./data/export/。
+// downloadFile 下载单个导出文件到 ./data/export/（带网络重试）。
 func (exporter *ExportFilePath) downloadFile(ctx context.Context, filename string) error {
 	if err := os.MkdirAll(exportDir, 0o755); err != nil {
 		return err
 	}
 	url := fmt.Sprintf(exportFileURL, filename)
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, err := doRequestWithRetry(ctx, exporter.client, http.MethodGet, url, nil)
 	if err != nil {
 		return err
-	}
-	response, err := exporter.client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 400 {
-		return fmt.Errorf("export file returned HTTP %d", response.StatusCode)
 	}
 	target := filepath.Join(exportDir, filename)
 	tmp := target + ".tmp"
-	file, err := os.Create(tmp)
-	if err != nil {
+	if err := os.WriteFile(tmp, body, 0o644); err != nil {
 		return err
-	}
-	_, copyErr := io.Copy(file, response.Body)
-	closeErr := file.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return closeErr
 	}
 	return os.Rename(tmp, target)
 }
