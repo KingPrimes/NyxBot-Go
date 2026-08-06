@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -98,6 +99,53 @@ func (importer *DataImporter) ImportAll(ctx context.Context) {
 		if err := step.run(ctx); err != nil {
 			logging.WarnPack("warframe.import", "%s import failed: %v", step.name, err)
 		}
+	}
+}
+
+// flexibleNumber 兼容 JSON 数字与数字字符串（CDN 数据部分字段以字符串存储，如 "0"）。
+type flexibleNumber float64
+
+// UnmarshalJSON 接受数字或数字字符串。
+func (number *flexibleNumber) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*number = 0
+		return nil
+	}
+	var asFloat float64
+	if err := json.Unmarshal(data, &asFloat); err == nil {
+		*number = flexibleNumber(asFloat)
+		return nil
+	}
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		value, err := strconv.ParseFloat(strings.TrimSpace(asString), 64)
+		if err != nil {
+			return err
+		}
+		*number = flexibleNumber(value)
+		return nil
+	}
+	return fmt.Errorf("invalid number %q", string(data))
+}
+
+// Float64 返回数值。
+func (number flexibleNumber) Float64() float64 {
+	return float64(number)
+}
+
+// rarityNameToOrdinal CDN rarity 字符串枚举名 → RarityEnum ORDINAL（对齐 model 包映射）。
+func rarityNameToOrdinal(name string) int {
+	switch name {
+	case "COMMON":
+		return 0
+	case "UNCOMMON":
+		return 1
+	case "RARE":
+		return 2
+	case "LEGENDARY":
+		return 3
+	default:
+		return 0
 	}
 }
 
@@ -432,23 +480,24 @@ func (importer *DataImporter) ImportAlias(_ context.Context) error {
 }
 
 // ImportRivenTion 从 CDN market_riven_tion.json 导入（按 urlName 业务键智能更新）。
+// CDN 数据的 negative_only 等字段是字符串（如 "0"），用 flexibleNumber 兼容。
 func (importer *DataImporter) ImportRivenTion(_ context.Context) error {
 	raw, err := cdnFetchFile("warframe/market_riven_tion.json")
 	if err != nil {
 		return err
 	}
 	var records []struct {
-		IDs                uint    `json:"ids"`
-		Effect             string  `json:"effect"`
-		Group              string  `json:"group"`
-		NegativeOnly       float64 `json:"negative_only"`
-		PositiveIsNegative float64 `json:"positive_is_negative"`
-		Prefix             string  `json:"prefix"`
-		SearchOnly         float64 `json:"search_only"`
-		Suffix             string  `json:"suffix"`
-		Units              string  `json:"units"`
-		URLName            string  `json:"url_name"`
-		ExclusiveTo        string  `json:"exclusive_to"`
+		IDs                uint           `json:"ids"`
+		Effect             string         `json:"effect"`
+		Group              string         `json:"group"`
+		NegativeOnly       flexibleNumber `json:"negative_only"`
+		PositiveIsNegative flexibleNumber `json:"positive_is_negative"`
+		Prefix             string         `json:"prefix"`
+		SearchOnly         flexibleNumber `json:"search_only"`
+		Suffix             string         `json:"suffix"`
+		Units              string         `json:"units"`
+		URLName            string         `json:"url_name"`
+		ExclusiveTo        string         `json:"exclusive_to"`
 	}
 	if err := json.Unmarshal(raw, &records); err != nil {
 		return fmt.Errorf("parse market_riven_tion.json: %w", err)
@@ -465,10 +514,10 @@ func (importer *DataImporter) ImportRivenTion(_ context.Context) error {
 			IDs:                existing[record.URLName],
 			Effect:             record.Effect,
 			Group:              record.Group,
-			NegativeOnly:       record.NegativeOnly,
-			PositiveIsNegative: record.PositiveIsNegative,
+			NegativeOnly:       record.NegativeOnly.Float64(),
+			PositiveIsNegative: record.PositiveIsNegative.Float64(),
 			Prefix:             record.Prefix,
-			SearchOnly:         record.SearchOnly,
+			SearchOnly:         record.SearchOnly.Float64(),
 			Suffix:             record.Suffix,
 			Units:              record.Units,
 			URLName:            record.URLName,
@@ -807,6 +856,7 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 }
 
 // ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 运行时替换）。
+// CDN 数据的 rarity 是字符串枚举名（如 "COMMON"），经 rarityNameToOrdinal 转 ORDINAL。
 func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 	raw, err := cdnFetchFile("warframe/reward_pool.json")
 	if err != nil {
@@ -817,7 +867,7 @@ func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 		Rewards    []struct {
 			ID        string `json:"id"`
 			Item      string `json:"item"`
-			Rarity    int    `json:"rarity"`
+			Rarity    string `json:"rarity"`
 			ItemCount int    `json:"itemCount"`
 		} `json:"rewards"`
 	}
@@ -840,7 +890,7 @@ func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 				ID:        id,
 				PoolID:    record.UniqueName,
 				Item:      item,
-				Rarity:    reward.Rarity,
+				Rarity:    rarityNameToOrdinal(reward.Rarity),
 				ItemCount: reward.ItemCount,
 			})
 		}

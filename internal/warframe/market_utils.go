@@ -118,14 +118,13 @@ func (api *MarketAPI) doGet(url string) ([]byte, error) {
 	return body, nil
 }
 
-// marketPayload 市场 API 通用响应外壳 { payload: { items: [...] } }。
+// marketPayload 市场 API 通用响应外壳 { data: [...] }。
+// 经真实 API 验证（v0.25.0）：响应为 {"apiVersion":"...","data":[...]}，无 payload 包裹。
 type marketPayload struct {
-	Payload struct {
-		Items []json.RawMessage `json:"items"`
-	} `json:"payload"`
+	Data []json.RawMessage `json:"data"`
 }
 
-// fetchItemsRaw 拉取指定端点的 items 原始数组。
+// fetchItemsRaw 拉取指定端点的 data 原始数组。
 func (api *MarketAPI) fetchItemsRaw(url string) ([]json.RawMessage, error) {
 	body, err := api.Get(url)
 	if err != nil {
@@ -135,7 +134,7 @@ func (api *MarketAPI) fetchItemsRaw(url string) ([]json.RawMessage, error) {
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", url, err)
 	}
-	return envelope.Payload.Items, nil
+	return envelope.Data, nil
 }
 
 // marketEntry 市场条目通用反序列化结构（对齐 Java 各 Service 的 build* 方法）：

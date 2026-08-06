@@ -62,14 +62,14 @@ func TestModelJSONContract(t *testing.T) {
 	}
 }
 
-// TestMarketEntryI18n 验证市场条目 i18n.zh-hans 嵌套解析（对齐 Java build* 方法）。
+// TestMarketEntryI18n 验证市场条目解析（真实 API v0.25.0 结构：{"data":[...]} + i18n.zh-hans 嵌套）。
 func TestMarketEntryI18n(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"payload":{"items":[
-			{"id":"1","slug":"rhino_prime_set","gameRef":"Rhino Prime Set","bulkTradable":true,"i18n":{"zh-hans":{"name":"犀牛P","icon":"i1","thumb":"t1"}}},
+		fmt.Fprint(w, `{"apiVersion":"0.25.0","data":[
+			{"id":"1","slug":"rhino_prime_set","gameRef":"Rhino Prime Set","bulkTradable":true,"maxRank":30,"ducats":45,"vaulted":false,"i18n":{"zh-hans":{"name":"犀牛P","icon":"i1","thumb":"t1"}}},
 			{"id":"2","slug":"no_i18n","gameRef":"No I18n"}
-		]}}`)
+		]}`)
 	}))
 	defer server.Close()
 
@@ -81,10 +81,19 @@ func TestMarketEntryI18n(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
-	if items[0].Name != "犀牛P" || items[0].Icon != "i1" || items[0].Thumb != "t1" || !items[0].BulkTradable {
+	if items[0].Name != "犀牛P" || items[0].Icon != "i1" || items[0].Thumb != "t1" || !items[0].BulkTradable || items[0].Ducats != 45 {
 		t.Fatalf("i18n resolve mismatch: %+v", items[0])
 	}
 	if items[1].Name != "no_i18n" {
 		t.Fatalf("missing i18n should fallback to slug: %+v", items[1])
+	}
+
+	// riven 端点同样走 data 数组
+	rivenItems, err := api.FetchRivenWeapons()
+	if err != nil {
+		t.Fatalf("FetchRivenWeapons failed: %v", err)
+	}
+	if len(rivenItems) != 2 {
+		t.Fatalf("expected 2 riven weapons, got %d", len(rivenItems))
 	}
 }
