@@ -26,19 +26,18 @@ type Canvas struct {
 // canvasMu 限制并发绘图数量（对齐 Java DRAW_SEMAPHORE max 2）。
 var canvasMu = make(chan struct{}, 2)
 
-// NewCanvas 创建指定尺寸的透明画布。
+// NewCanvas 创建指定尺寸的画布并铺白底。各 Draw 入口随后用页面背景色 FillRect 铺满覆盖，
+// 此处白色仅作为所有绘图路径一致的初始底色，保证透明区域稳定。
 func NewCanvas(width, height int) *Canvas {
 	canvasMu <- struct{}{}
 	dc := gg.NewContext(width, height)
-	dc.SetColor(colorWhite())
+	dc.SetColor(textColor)
 	dc.Clear()
 	return &Canvas{dc: dc, width: width, height: height, face: textFace(defaultFontSize), size: defaultFontSize}
 }
 
 // release 释放画布（Encode 后调用）。
 func (c *Canvas) release() { <-canvasMu }
-
-func colorWhite() color.RGBA { return textColor }
 
 // SetColor 设置当前绘图颜色。
 func (c *Canvas) SetColor(rgba color.RGBA) *Canvas {
@@ -153,12 +152,13 @@ func (c *Canvas) ascent() float64 {
 	return float64(c.face.Metrics().Ascent.Ceil())
 }
 
-// AddText 绘制文本（y 为基线，对齐 AWT drawString）。
+// AddText 绘制文本（y 为基线，对齐 AWT drawString；
+// gg 的 DrawStringAnchored(ax=0, ay=0) 中 y 本身即为基线，无需再做 ascent 修正）。
 func (c *Canvas) AddText(text string, x, y float64) *Canvas {
 	if text == "" || c.face == nil {
 		return c
 	}
-	c.dc.DrawStringAnchored(text, x, y-c.ascent(), 0, 0)
+	c.dc.DrawStringAnchored(text, x, y, 0, 0)
 	return c
 }
 
@@ -286,14 +286,14 @@ func (c *Canvas) DrawTitle(text string) *Canvas {
 	c.SetColor(color.RGBA{255, 255, 255, 255}).
 		DrawRoundRect(bgX, bgY, bgW, bgH, 15)
 
-	// 阴影 + 文字
+	// 阴影 + 文字（currentY 为基线，DrawStringAnchored(0,0) y 即基线）
 	currentY := startY
 	for _, line := range lines {
 		lineX := (float64(c.width) - c.StringWidth(line)) / 2
 		c.dc.SetColor(color.RGBA{0, 0, 0, 100})
-		c.dc.DrawStringAnchored(line, lineX+1, currentY-c.ascent()+1, 0, 0)
+		c.dc.DrawStringAnchored(line, lineX+1, currentY+1, 0, 0)
 		c.SetColor(textColor)
-		c.dc.DrawStringAnchored(line, lineX, currentY-c.ascent(), 0, 0)
+		c.dc.DrawStringAnchored(line, lineX, currentY, 0, 0)
 		currentY += c.lineHeight() + 5
 	}
 	return c
@@ -348,7 +348,8 @@ func (c *Canvas) DrawImageWithAspectRatio(img image.Image, x, y, maxW, maxH floa
 	return c
 }
 
-// standingMu 看板娘随机选择的互斥（math/rand 全局源并发安全，无需互斥，保留字段供扩展）。
+// standingMu 看板娘随机选择的互斥。math/rand 顶层函数内部已带锁（并发安全），
+// 此处仍显式加锁，以明确"对同一看板娘池的并发选取"这一共享意图。
 var standingMu sync.Mutex
 
 // DrawStandingAt 在指定盒子绘制随机看板娘（保持比例居中，对齐 ImageCombiner.drawStandingAt）。

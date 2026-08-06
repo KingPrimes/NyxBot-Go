@@ -224,17 +224,4 @@ func scaleByPct(w, h, pct float64) (int, int) {
 	return int(w * pct), int(h * pct)
 }
 
-// maxI / minI int 比较辅助。
-func maxI(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
-func minI(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

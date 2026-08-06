@@ -103,17 +103,4 @@ func drawHelpTag(canvas *Canvas, cmd string, x, y, w, h, radius, pad float64, do
 	canvas.AddText(cmd, x+pad+20, y+h/2+8)
 }
 
-// maxF / minF float64 比较辅助。
-func maxF(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}
 
-func minF(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}

@@ -95,3 +95,25 @@ func matchFaction(enemy string) drawplugin.FactionInfo {
 	}
 	return drawplugin.FactionMap[drawplugin.FactionNone]
 }
+
+// maxF / maxI / minI 数值比较辅助（对应 Java Math.max/min 的常见调用，集中定义便于各绘制文件复用）。
+func maxF(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxI(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minI(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
