@@ -139,8 +139,9 @@ const (
 )
 
 var IconMap = map[Icon]string{
-	IconSmile: "\ue300", IconMeh: "\ue302", IconCubes: "\ue303",
-	IconDucats: "\ue304", IconCredits: "\ue305", IconAyan: "\ue306",
-	IconPlatinum: "\ue307", IconRefresh: "\ue308", IconCold: "\ue309",
-	IconSun: "\ue30a", IconNight: "\ue30b",
+	// \u7801\u70b9\u5bf9\u9f50 Java IconEnum\uff082026-08-06 \u4fee\u6b63\uff1a\u539f\u503c\u6574\u4f53\u9519\u4f4d\uff0cDUCATS \u7b49\u4e0e\u5b9e\u9645\u5b57\u4f53\u4e0d\u7b26\uff09
+	IconSmile: "\ue300", IconMeh: "\ue302", IconCubes: "\ue304",
+	IconDucats: "\ue305", IconCredits: "\ue306", IconAyan: "\ue308",
+	IconPlatinum: "\ue309", IconRefresh: "\ue310", IconCold: "\ue100",
+	IconSun: "\ue101", IconNight: "\ue102",
 }
