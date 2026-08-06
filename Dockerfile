@@ -1,24 +1,9 @@
-FROM golang:1.25-alpine AS builder
-
-WORKDIR /src
-
-RUN apk add --no-cache git
-
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
-    -ldflags "-X nyxbot-go/internal/version.Version=${VERSION} -X nyxbot-go/internal/version.Commit=${COMMIT}" \
-    -o /out/NyxBot ./cmd/server
-
+# 运行时镜像：直接使用 CI linux job 构建好的二进制（dist/linux/{TARGETARCH}/NyxBot）
+# 不再在 Docker 内重复编译；多平台构建由 buildx 的 TARGETARCH 自动选择对应产物
 FROM alpine:3.20
+
+# buildx 多平台构建时自动注入（linux/amd64 → amd64，linux/arm64 → arm64）
+ARG TARGETARCH
 
 RUN apk add --no-cache ca-certificates tzdata font-noto-cjk \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
@@ -27,7 +12,7 @@ RUN apk add --no-cache ca-certificates tzdata font-noto-cjk \
 
 WORKDIR /app
 
-COPY --from=builder /out/NyxBot /app/NyxBot
+COPY dist/linux/${TARGETARCH}/NyxBot /app/NyxBot
 COPY resources /app/resources
 COPY config.yaml /app/config.yaml
 COPY build/icons/icon.png /app/resources/icon.png

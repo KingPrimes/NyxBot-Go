@@ -18,24 +18,28 @@ jobs:
     name: Read Metadata
     runs-on: ubuntu-latest
     outputs:
-      name: ${{ steps.meta.outputs.name }}
       executable_name: ${{ steps.meta.outputs.executable_name }}
       product_name: ${{ steps.meta.outputs.product_name }}
       description: ${{ steps.meta.outputs.description }}
       version: ${{ steps.meta.outputs.version }}
-      identifier: ${{ steps.meta.outputs.identifier }}
     steps:
       - uses: actions/checkout@v4
       - id: meta
         shell: bash
         run: |
           META="build/metadata/app.json"
-          echo "name=$(jq -r '.name' "$META")" >> "$GITHUB_OUTPUT"
+          VERSION=$(jq -r '.version' "$META")
+          # 优先使用 git tag 版本号（v1.2.3 → 1.2.3），无 tag（手动触发）回退 app.json
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "$TAG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              VERSION="$TAG_VERSION"
+            fi
+          fi
           echo "executable_name=$(jq -r '.executableName' "$META")" >> "$GITHUB_OUTPUT"
           echo "product_name=$(jq -r '.productName' "$META")" >> "$GITHUB_OUTPUT"
           echo "description=$(jq -r '.description' "$META")" >> "$GITHUB_OUTPUT"
-          echo "version=$(jq -r '.version' "$META")" >> "$GITHUB_OUTPUT"
-          echo "identifier=$(jq -r '.identifier' "$META")" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   linux:
     name: Linux ${{ matrix.goarch }}
@@ -49,25 +53,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Build
+      - name: Build binary
         shell: bash
         run: |
-          OUT="dist/${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}"
-          mkdir -p "$OUT/icons" "$OUT/linux"
           GOOS=linux GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build \
             -ldflags "-X nyxbot-go/internal/version.Version=${{ needs.metadata.outputs.version }} -X nyxbot-go/internal/version.Commit=${{ github.sha }}" \
-            -o "$OUT/${{ needs.metadata.outputs.executable_name }}" ./cmd/server
-          cp -r resources "$OUT/resources"
-          cp config.yaml "$OUT/config.yaml"
-          cp build/icons/icon.png "$OUT/icons/icon.png"
-          cp build/icons/icon.svg "$OUT/icons/icon.svg"
-          cp build/linux/NyxBot.desktop "$OUT/linux/NyxBot.desktop"
-          cp build/release/NOTES.md "$OUT/RELEASE_NOTES.md"
-          tar -czf "${OUT}.tar.gz" -C dist "${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}"
+            -o "dist/${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}" ./cmd/server
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}
-          path: dist/${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}.tar.gz
+          path: dist/${{ needs.metadata.outputs.executable_name }}-linux-${{ matrix.goarch }}
+          if-no-files-found: error
 
   macos:
     name: macOS ${{ matrix.goarch }}
@@ -81,38 +77,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Build app bundle
+      - name: Build binary
         shell: bash
         run: |
-          APP="dist/${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}.app"
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           GOOS=darwin GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build \
             -ldflags "-X nyxbot-go/internal/version.Version=${{ needs.metadata.outputs.version }} -X nyxbot-go/internal/version.Commit=${{ github.sha }}" \
-            -o "$APP/Contents/MacOS/${{ needs.metadata.outputs.executable_name }}" ./cmd/server
-          cp build/macos/Info.plist "$APP/Contents/Info.plist"
-          ICONSET="dist/icon.iconset"
-          mkdir -p "$ICONSET"
-          sips -z 16 16 build/icons/icon.png --out "$ICONSET/icon_16x16.png"
-          sips -z 32 32 build/icons/icon.png --out "$ICONSET/icon_16x16@2x.png"
-          sips -z 32 32 build/icons/icon.png --out "$ICONSET/icon_32x32.png"
-          sips -z 64 64 build/icons/icon.png --out "$ICONSET/icon_32x32@2x.png"
-          sips -z 128 128 build/icons/icon.png --out "$ICONSET/icon_128x128.png"
-          sips -z 256 256 build/icons/icon.png --out "$ICONSET/icon_128x128@2x.png"
-          sips -z 256 256 build/icons/icon.png --out "$ICONSET/icon_256x256.png"
-          sips -z 512 512 build/icons/icon.png --out "$ICONSET/icon_256x256@2x.png"
-          sips -z 512 512 build/icons/icon.png --out "$ICONSET/icon_512x512.png"
-          cp build/icons/icon.png "$ICONSET/icon_512x512@2x.png"
-          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/icon.icns"
-          cp build/icons/icon.svg "$APP/Contents/Resources/icon.svg"
-          cp -r resources "$APP/Contents/Resources/resources"
-          cp build/release/NOTES.md "dist/RELEASE_NOTES-darwin-${{ matrix.goarch }}.md"
-          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}.zip"
+            -o "dist/${{ needs.metadata.outputs.executable_name }}-darwin-${{ matrix.goarch }}" ./cmd/server
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}
-          path: |
-            dist/${{ needs.metadata.outputs.product_name }}-darwin-${{ matrix.goarch }}.zip
-            dist/RELEASE_NOTES-darwin-${{ matrix.goarch }}.md
+          name: ${{ needs.metadata.outputs.executable_name }}-darwin-${{ matrix.goarch }}
+          path: dist/${{ needs.metadata.outputs.executable_name }}-darwin-${{ matrix.goarch }}
+          if-no-files-found: error
 
   windows:
     name: Windows amd64
@@ -126,29 +101,60 @@ jobs:
       - name: Install goversioninfo
         shell: pwsh
         run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
-      - name: Build
+      - name: Sync version info
+        shell: pwsh
+        run: |
+          # 用发布版本号精确同步 versioninfo.json（版本/描述统一），不依赖固定版本字符串
+          $version = "${{ needs.metadata.outputs.version }}"
+          $parts = $version.Split('.')
+          $major = [int]$parts[0]
+          $minor = if ($parts.Count -gt 1) { [int]$parts[1] } else { 0 }
+          $patch = if ($parts.Count -gt 2) { [int]$parts[2] } else { 0 }
+          $json = Get-Content -LiteralPath "build/windows/versioninfo.json" -Raw | ConvertFrom-Json
+          $json.FixedFileInfo.FileVersion.Major = $major
+          $json.FixedFileInfo.FileVersion.Minor = $minor
+          $json.FixedFileInfo.FileVersion.Patch = $patch
+          $json.FixedFileInfo.ProductVersion.Major = $major
+          $json.FixedFileInfo.ProductVersion.Minor = $minor
+          $json.FixedFileInfo.ProductVersion.Patch = $patch
+          $json.StringFileInfo.FileVersion = $version
+          $json.StringFileInfo.ProductVersion = $version
+          $json.StringFileInfo.FileDescription = "${{ needs.metadata.outputs.description }}"
+          $json | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "build/windows/versioninfo.json" -Encoding UTF8
+      - name: Build binary
         shell: pwsh
         run: |
           goversioninfo -icon="build/icons/windows.ico" -o="cmd/server/resource.syso" "build/windows/versioninfo.json"
           $ldflags = "-X nyxbot-go/internal/version.Version=${{ needs.metadata.outputs.version }} -X nyxbot-go/internal/version.Commit=${{ github.sha }}"
-          $out = "dist/${{ needs.metadata.outputs.executable_name }}-windows-amd64"
-          New-Item -ItemType Directory -Path $out | Out-Null
-          go build -ldflags $ldflags -o "$out/${{ needs.metadata.outputs.executable_name }}.exe" ./cmd/server
-          Copy-Item -Recurse -LiteralPath "resources" -Destination "$out/resources"
-          Copy-Item -LiteralPath "config.yaml" -Destination "$out/config.yaml"
-          Copy-Item -LiteralPath "build/release/NOTES.md" -Destination "$out/RELEASE_NOTES.md"
-          Compress-Archive -Path "$out/*" -DestinationPath "$out.zip" -Force
+          New-Item -ItemType Directory -Path "dist" | Out-Null
+          go build -ldflags $ldflags -o "dist/${{ needs.metadata.outputs.executable_name }}.exe" ./cmd/server
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ needs.metadata.outputs.executable_name }}-windows-amd64
-          path: dist/${{ needs.metadata.outputs.executable_name }}-windows-amd64.zip
+          path: dist/${{ needs.metadata.outputs.executable_name }}.exe
+          if-no-files-found: error
 
   docker:
     name: Docker Image
-    needs: metadata
+    needs: [metadata, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 复用 linux job 的构建产物（amd64 + arm64），Dockerfile 不再重复编译
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.metadata.outputs.executable_name }}-linux-amd64
+          path: dist/linux/amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.metadata.outputs.executable_name }}-linux-arm64
+          path: dist/linux/arm64
+      - name: Prepare binaries
+        shell: bash
+        run: |
+          mv "dist/linux/amd64/${{ needs.metadata.outputs.executable_name }}-linux-amd64" "dist/linux/amd64/NyxBot"
+          mv "dist/linux/arm64/${{ needs.metadata.outputs.executable_name }}-linux-arm64" "dist/linux/arm64/NyxBot"
+          chmod +x dist/linux/*/NyxBot
       - uses: docker/setup-buildx-action@v3
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -189,4 +195,3 @@ jobs:
             PRODUCT_NAME=${{ needs.metadata.outputs.product_name }}
             DESCRIPTION=${{ needs.metadata.outputs.description }}
             VCS_REF=${{ github.sha }}
-            COMMIT=${{ github.sha }}
