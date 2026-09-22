@@ -118,6 +118,47 @@ func TestGetAlertsEmptyWhenWorldStateMissing(t *testing.T) {
 	}
 }
 
+// TestWorldStateQueriesRejectMalformedJSON exercises the shared API boundary
+// across each changed parser. Queries with an intentional local fallback are
+// asserted separately to document that contract.
+func TestWorldStateQueriesRejectMalformedJSON(t *testing.T) {
+	setupWorldStateBatchDB(t)
+	warframe.DefaultWorldState().SetRaw([]byte(`{`))
+
+	queries := []struct {
+		name  string
+		query func() error
+	}{
+		{"alerts", func() error { _, err := warframe.GetAlerts(); return err }},
+		{"archon hunt", func() error { _, err := warframe.GetLiteSorite(); return err }},
+		{"active missions", func() error { _, err := warframe.GetActiveMissions(false); return err }},
+		{"void storms", func() error { _, err := warframe.GetVoidStorms(); return err }},
+		{"invasions", func() error { _, err := warframe.GetInvasions(); return err }},
+		{"void traders", func() error { _, err := warframe.GetVoidTraders(); return err }},
+		{"daily deals", func() error { _, err := warframe.GetDailyDeals(); return err }},
+		{"sorties", func() error { _, err := warframe.GetSorties(); return err }},
+		{"syndicate", func() error { _, err := warframe.GetSyndicate(warframe.SyndicateOstrons); return err }},
+		{"nightwave", func() error { _, err := warframe.GetSeasonInfo(); return err }},
+		{"calendar", func() error { _, err := warframe.GetKnownCalendarSeasons(); return err }},
+	}
+	for _, query := range queries {
+		t.Run(query.name, func(t *testing.T) {
+			if err := query.query(); err == nil {
+				t.Fatal("malformed world-state JSON should return an error")
+			}
+		})
+	}
+
+	duviri, err := warframe.GetDuviriCycle()
+	if err != nil || duviri == nil || duviri.State == "" {
+		t.Fatalf("Duviri should retain its local fallback on malformed JSON: dto=%+v err=%v", duviri, err)
+	}
+	cycles, err := warframe.GetAllCycle()
+	if err != nil || cycles == nil || cycles.EarthCycle == nil {
+		t.Fatalf("cycles should retain their local fallback on malformed JSON: dto=%+v err=%v", cycles, err)
+	}
+}
+
 // TestGetLiteSorite 验证执刑官猎杀：Boss 中文映射、节点翻译、任务类型名与配色。
 func TestGetLiteSorite(t *testing.T) {
 	setupWorldStateBatchDB(t)
