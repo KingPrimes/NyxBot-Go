@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+// TimeDeltaToString 将毫秒差转换为 "Xd Xh Xm Xs" 可读格式（对齐 Java TimeUtils.timeDeltaToString）。
+// 导出供 warframe 查询层生成「剩余时间」文本。
+func TimeDeltaToString(millis int64) string {
+	return timeDeltaToString(millis)
+}
+
 func timeDeltaToString(millis int64) string {
 	if millis < 0 {
 		millis = -millis

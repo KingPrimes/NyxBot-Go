@@ -88,7 +88,7 @@ func DrawSorties(sorties *Sortie) []byte {
 			if mtOK {
 				mtName = mtInfo.Name
 			}
-			canvas.SetColor(missionTypeColor(v.MissionType)).SetFontSize(26)
+			canvas.SetColor(MissionTypeColor(v.MissionType)).SetFontSize(26)
 			canvas.AddText("• "+mtName+" - "+node, float64(imageMargin+20), float64(y))
 			if v.ModifierType != "" {
 				y += 40
