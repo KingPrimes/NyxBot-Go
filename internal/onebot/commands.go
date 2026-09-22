@@ -16,12 +16,16 @@ import (
 	"nyxbot-go/internal/logging"
 	modelsystem "nyxbot-go/internal/model/system"
 	"nyxbot-go/internal/version"
+	"nyxbot-go/internal/warframe"
 )
 
 const (
 	helpDocumentURL     = "https://kingprimes.top/posts/1bb16eb"
 	commandStatusOK     = 0
 	commandStatusFailed = 1
+
+	// noticeHandlerPriority 通知事件匹配器优先级（低于指令 +10 区间，避免抢占消息事件）。
+	noticeHandlerPriority = 1
 )
 
 // CommandHandler 处理已通过正则和权限检查的指令，parameter 为移除指令前缀后的参数。
@@ -57,6 +61,7 @@ func newCommandRegistry(pluginPrefixProvider func() bool) *CommandRegistry {
 	registry.handlers[nyxbot.CmdHelp] = registry.help
 	registry.handlers[nyxbot.CmdCheckVersion] = registry.systemInfo
 	registry.installStageCommands()
+	registry.registerNoticeHandlers()
 	return registry
 }
 
@@ -109,6 +114,25 @@ func (registry *CommandRegistry) Register() error {
 // Close 从 ZeroBot 移除本注册器创建的全部 matcher。
 func (registry *CommandRegistry) Close() {
 	registry.engine.Delete()
+}
+
+// registerNoticeHandlers 注册通知类事件处理器。
+//
+// 订阅数据依赖「群成员减少」事件做级联清理（对齐 Java WarframeTaskSubscribePlugin.onGroupDecrease）：
+// 成员退群时删其订阅，Bot 被踢时删整群订阅。
+//
+// 注意：ZeroBot 包级函数（如 zero.OnNotice）作用于全局 defaultEngine，因此这里用注册器自身的
+// engine 注册，使其生命周期与 Close() 一致，避免多次 Register/Close 后残留 matcher。
+func (registry *CommandRegistry) registerNoticeHandlers() {
+	registry.engine.
+		On("notice", zero.Type("notice")).
+		SetPriority(noticeHandlerPriority).
+		Handle(func(ctx *zero.Ctx) {
+			if ctx == nil || ctx.Event == nil || ctx.Event.NoticeType != "group_decrease" {
+				return
+			}
+			warframe.HandleGroupDecrease(ctx.Event.GroupID, ctx.Event.UserID, ctx.Event.SelfID)
+		})
 }
 
 func (registry *CommandRegistry) wrap(code nyxbot.Codes, info nyxbot.CodeInfo, pattern *regexp.Regexp, handler CommandHandler) zero.Handler {
