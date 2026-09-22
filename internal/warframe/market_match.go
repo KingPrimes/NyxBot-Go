@@ -153,38 +153,27 @@ func findLichSisterByNameRegex(key string) *modelwarframe.LichSisterWeapon {
 
 // firstOrdersItem 按条件查询单条市场物品（按 id 稳定排序，无结果或库不可用时返回 nil）。
 func firstOrdersItem(query string, args ...any) *modelwarframe.OrdersItem {
-	if database.DB == nil {
-		return nil
-	}
-	var item modelwarframe.OrdersItem
-	if err := database.DB.Where(query, args...).Order("id").First(&item).Error; err != nil {
-		logging.DebugPack("warframe.market", "query orders item failed: %v", err)
-		return nil
-	}
-	return &item
+	return firstMarketItem[modelwarframe.OrdersItem]("orders item", query, args...)
 }
 
 // firstRivenItem 按条件查询单条紫卡武器。
 func firstRivenItem(query string, args ...any) *modelwarframe.RivenItem {
-	if database.DB == nil {
-		return nil
-	}
-	var item modelwarframe.RivenItem
-	if err := database.DB.Where(query, args...).Order("id").First(&item).Error; err != nil {
-		logging.DebugPack("warframe.market", "query riven item failed: %v", err)
-		return nil
-	}
-	return &item
+	return firstMarketItem[modelwarframe.RivenItem]("riven item", query, args...)
 }
 
 // firstLichSisterWeapon 按条件查询单条赤毒/信条武器。
 func firstLichSisterWeapon(query string, args ...any) *modelwarframe.LichSisterWeapon {
+	return firstMarketItem[modelwarframe.LichSisterWeapon]("lich sister weapon", query, args...)
+}
+
+// firstMarketItem 按条件查询单条市场模型（按 id 稳定排序）。
+func firstMarketItem[T any](name, query string, args ...any) *T {
 	if database.DB == nil {
 		return nil
 	}
-	var item modelwarframe.LichSisterWeapon
+	var item T
 	if err := database.DB.Where(query, args...).Order("id").First(&item).Error; err != nil {
-		logging.DebugPack("warframe.market", "query lich sister weapon failed: %v", err)
+		logging.DebugPack("warframe.market", "query %s failed: %v", name, err)
 		return nil
 	}
 	return &item
@@ -192,41 +181,30 @@ func firstLichSisterWeapon(query string, args ...any) *modelwarframe.LichSisterW
 
 // ordersItemsLike 按 name LIKE %prefix% 载入市场物品候选。
 func ordersItemsLike(prefix string) []modelwarframe.OrdersItem {
-	if database.DB == nil || prefix == "" {
-		return nil
-	}
-	var items []modelwarframe.OrdersItem
-	if err := database.DB.Where("name LIKE ?", "%"+prefix+"%").Order("id").Find(&items).Error; err != nil {
-		logging.DebugPack("warframe.market", "load orders items %q failed: %v", prefix, err)
-		return nil
-	}
-	return items
+	return marketItemsLike[modelwarframe.OrdersItem]("orders items", prefix)
 }
 
 // rivenItemsLike 按 name LIKE %prefix% 载入紫卡武器候选。
 func rivenItemsLike(prefix string) []modelwarframe.RivenItem {
-	if database.DB == nil || prefix == "" {
-		return nil
-	}
-	var items []modelwarframe.RivenItem
-	if err := database.DB.Where("name LIKE ?", "%"+prefix+"%").Order("id").Find(&items).Error; err != nil {
-		logging.DebugPack("warframe.market", "load riven items %q failed: %v", prefix, err)
-		return nil
-	}
-	return items
+	return marketItemsLike[modelwarframe.RivenItem]("riven items", prefix)
 }
 
 // lichSisterWeaponsLike 按 name LIKE %prefix% 载入赤毒/信条武器候选。
 func lichSisterWeaponsLike(prefix string) []modelwarframe.LichSisterWeapon {
+	return marketItemsLike[modelwarframe.LichSisterWeapon]("lich sister weapons", prefix)
+}
+
+// marketItemsLike 按名称片段载入市场模型候选。
+func marketItemsLike[T any](name, prefix string) []T {
 	if database.DB == nil || prefix == "" {
 		return nil
 	}
-	var weapons []modelwarframe.LichSisterWeapon
-	if err := database.DB.Where("name LIKE ?", "%"+prefix+"%").Order("id").Find(&weapons).Error; err != nil {
-		logging.DebugPack("warframe.market", "load lich sister %q failed: %v", prefix, err)
+	var items []T
+	if err := database.DB.Where("name LIKE ?", "%"+prefix+"%").Order("id").Find(&items).Error; err != nil {
+		logging.DebugPack("warframe.market", "load %s %q failed: %v", name, prefix, err)
 		return nil
 	}
-	return weapons
+	return items
 }
 
 // ordersItemCandidates 返回市场物品候选名（对齐 Java getPossibleItems）：
@@ -262,42 +240,28 @@ func lichSisterCandidates(key, original string) []string {
 
 // ordersItemNames 提取候选名并截断 limit 条（limit<=0 表示不截断）。
 func ordersItemNames(items []modelwarframe.OrdersItem, limit int) []string {
-	names := make([]string, 0, len(items))
-	for i := range items {
-		if items[i].Name == "" {
-			continue
-		}
-		names = append(names, items[i].Name)
-		if limit > 0 && len(names) >= limit {
-			break
-		}
-	}
-	return names
+	return marketItemNames(items, limit, func(item *modelwarframe.OrdersItem) string { return item.Name })
 }
 
 // rivenItemNames 提取紫卡候选名并截断 limit 条。
 func rivenItemNames(items []modelwarframe.RivenItem, limit int) []string {
-	names := make([]string, 0, len(items))
-	for i := range items {
-		if items[i].Name == "" {
-			continue
-		}
-		names = append(names, items[i].Name)
-		if limit > 0 && len(names) >= limit {
-			break
-		}
-	}
-	return names
+	return marketItemNames(items, limit, func(item *modelwarframe.RivenItem) string { return item.Name })
 }
 
 // lichSisterNames 提取赤毒/信条候选名并截断 limit 条。
 func lichSisterNames(weapons []modelwarframe.LichSisterWeapon, limit int) []string {
-	names := make([]string, 0, len(weapons))
-	for i := range weapons {
-		if weapons[i].Name == "" {
+	return marketItemNames(weapons, limit, func(item *modelwarframe.LichSisterWeapon) string { return item.Name })
+}
+
+// marketItemNames 提取非空候选名并按需截断。
+func marketItemNames[T any](items []T, limit int, nameOf func(*T) string) []string {
+	names := make([]string, 0, len(items))
+	for i := range items {
+		name := nameOf(&items[i])
+		if name == "" {
 			continue
 		}
-		names = append(names, weapons[i].Name)
+		names = append(names, name)
 		if limit > 0 && len(names) >= limit {
 			break
 		}

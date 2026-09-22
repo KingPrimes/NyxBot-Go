@@ -19,8 +19,11 @@ import (
 	modelwarframe "nyxbot-go/internal/model/warframe"
 )
 
-// ErrWorldStateNotReady 表示世界状态原始数据尚未成功拉取。
-var ErrWorldStateNotReady = errors.New("世界状态数据尚未就绪，请稍后再试")
+var (
+	// ErrWorldStateNotReady 表示世界状态原始数据尚未成功拉取。
+	ErrWorldStateNotReady = errors.New("世界状态数据尚未就绪，请稍后再试")
+	errWorldStateParse    = errors.New("世界状态数据解析失败")
+)
 
 // wsEnvelope 对齐 Java WorldState 顶层 JSON 字段（仅声明本批次用到的数组）。
 type wsEnvelope struct {
@@ -326,14 +329,20 @@ func bossName(key string) string {
 
 // parseWorldState 从默认缓存读取原始 JSON 并解析 envelope。
 func parseWorldState() (*wsEnvelope, error) {
+	return parseWorldStateEnvelope[wsEnvelope]("world state")
+}
+
+// parseWorldStateEnvelope 从默认缓存解析指定的 WorldState 视图。
+// 各查询只声明自身所需字段，但共享相同的就绪检查、错误处理与日志格式。
+func parseWorldStateEnvelope[T any](name string) (*T, error) {
 	raw := DefaultWorldState().Raw()
 	if len(raw) == 0 {
 		return nil, ErrWorldStateNotReady
 	}
-	var env wsEnvelope
+	var env T
 	if err := json.Unmarshal(raw, &env); err != nil {
-		logging.WarnPack("warframe.status", "parse world state envelope failed: %v", err)
-		return nil, errors.New("世界状态数据解析失败")
+		logging.WarnPack("warframe.status", "parse %s envelope failed: %v", name, err)
+		return nil, errWorldStateParse
 	}
 	return &env, nil
 }

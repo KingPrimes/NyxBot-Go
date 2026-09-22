@@ -5,6 +5,7 @@
 package onebot
 
 import (
+	"sort"
 	"strings"
 
 	zero "github.com/wdvxdr1123/ZeroBot"
@@ -240,13 +241,7 @@ func stripMarketAlias(parameter string, aliases ...string) string {
 	}
 	// 再处理无 "/" 的别名（按长度降序，避免短别名吃掉长别名）
 	sorted := append([]string(nil), aliases...)
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if len(sorted[j]) > len(sorted[i]) {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
-	}
+	sort.SliceStable(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
 	for _, alias := range sorted {
 		if strings.HasPrefix(alias, "/") || alias == "" {
 			continue

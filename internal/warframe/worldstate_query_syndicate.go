@@ -6,7 +6,6 @@
 package warframe
 
 import (
-	"encoding/json"
 	"errors"
 
 	"gorm.io/gorm"
@@ -65,7 +64,7 @@ type wsSyndicateJob struct {
 // GetSyndicate 查询指定集团的赏金任务（对齐 Java getSyndicateMissions）。
 // 未找到该集团或该集团没有 Jobs 时返回空结果（不报错，由指令层提示）。
 func GetSyndicate(syndicate WfSyndicate) (*draw.SyndicateMission, error) {
-	env, err := parseSyndicateEnvelope()
+	env, err := parseWorldStateEnvelope[wsSyndicateEnvelope]("syndicate")
 	if err != nil {
 		return nil, err
 	}
@@ -173,18 +172,4 @@ func syndicateJobRewards(rewardsKey string) []*draw.SyndicateReward {
 		})
 	}
 	return list
-}
-
-// parseSyndicateEnvelope 从默认缓存读取原始 JSON 并解析三赏金 envelope。
-func parseSyndicateEnvelope() (*wsSyndicateEnvelope, error) {
-	raw := DefaultWorldState().Raw()
-	if len(raw) == 0 {
-		return nil, ErrWorldStateNotReady
-	}
-	var env wsSyndicateEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		logging.WarnPack("warframe.status", "parse syndicate envelope failed: %v", err)
-		return nil, errors.New("世界状态数据解析失败")
-	}
-	return &env, nil
 }

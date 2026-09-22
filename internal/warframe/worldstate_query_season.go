@@ -10,7 +10,6 @@
 package warframe
 
 import (
-	"encoding/json"
 	"errors"
 	"sort"
 	"strconv"
@@ -58,7 +57,7 @@ func GetDuviriCycle() (*draw.DuvalierCycle, error) {
 		TimeLeft: computed.TimeLeft,
 	}
 
-	env, err := parseDuviriEnvelope()
+	env, err := parseWorldStateEnvelope[wsDuviriEnvelope]("duviri")
 	if err != nil {
 		// 情绪可本地推算，WorldState 不可用时仍返回情绪卡
 		return dto, nil
@@ -74,20 +73,6 @@ func GetDuviriCycle() (*draw.DuvalierCycle, error) {
 		})
 	}
 	return dto, nil
-}
-
-// parseDuviriEnvelope 解析双衍 envelope（未就绪或解析失败均返回错误，由调用方降级）。
-func parseDuviriEnvelope() (*wsDuviriEnvelope, error) {
-	raw := DefaultWorldState().Raw()
-	if len(raw) == 0 {
-		return nil, ErrWorldStateNotReady
-	}
-	var env wsDuviriEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		logging.WarnPack("warframe.status", "parse duviri envelope failed: %v", err)
-		return nil, errors.New("世界状态数据解析失败")
-	}
-	return &env, nil
 }
 
 // duviriCategory 分类字符串 → 绘图枚举（未命中按普通处理）。
@@ -155,14 +140,9 @@ type wsActiveChallenge struct {
 // GetSeasonInfo 解析电波（对齐 Java WorldStateUtils.getSeasonInfo）：
 // 按 Challenge 关联 night_wave 表补全名称/描述/声望，标记位取自载荷。
 func GetSeasonInfo() (*draw.SeasonInfo, error) {
-	raw := DefaultWorldState().Raw()
-	if len(raw) == 0 {
-		return nil, ErrWorldStateNotReady
-	}
-	var env wsSeasonEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		logging.WarnPack("warframe.status", "parse season envelope failed: %v", err)
-		return nil, errors.New("世界状态数据解析失败")
+	env, err := parseWorldStateEnvelope[wsSeasonEnvelope]("season")
+	if err != nil {
+		return nil, err
 	}
 	if env.SeasonInfo == nil {
 		return &draw.SeasonInfo{}, nil
@@ -257,14 +237,9 @@ var calendarSeasonNames = map[string]string{
 // GetKnownCalendarSeasons 解析 1999 日历（对齐 Java getKnownCalendarSeasons）：
 // 把 Days 的「一年中第几天」换算为月/日并按月分组，事件按类型查 state_translation 翻译。
 func GetKnownCalendarSeasons() ([]*draw.KnownCalendarSeasons, error) {
-	raw := DefaultWorldState().Raw()
-	if len(raw) == 0 {
-		return nil, ErrWorldStateNotReady
-	}
-	var env wsCalendarEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		logging.WarnPack("warframe.status", "parse calendar envelope failed: %v", err)
-		return nil, errors.New("世界状态数据解析失败")
+	env, err := parseWorldStateEnvelope[wsCalendarEnvelope]("calendar")
+	if err != nil {
+		return nil, err
 	}
 	if len(env.KnownCalendarSeasons) == 0 {
 		return nil, errors.New("1999 日历数据为空")

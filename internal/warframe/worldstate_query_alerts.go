@@ -8,13 +8,10 @@
 package warframe
 
 import (
-	"encoding/json"
-	"errors"
 	"time"
 
 	"nyxbot-go/internal/draw"
 	"nyxbot-go/internal/enum/drawplugin"
-	"nyxbot-go/internal/logging"
 	"nyxbot-go/internal/warframe/cycle"
 )
 
@@ -170,16 +167,7 @@ func remainingFrom(expiry time.Time) string {
 
 // parseAlertEnvelope 从默认缓存读取原始 JSON 并解析本批次的 envelope。
 func parseAlertEnvelope() (*wsAlertEnvelope, error) {
-	raw := DefaultWorldState().Raw()
-	if len(raw) == 0 {
-		return nil, ErrWorldStateNotReady
-	}
-	var env wsAlertEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		logging.WarnPack("warframe.status", "parse alert envelope failed: %v", err)
-		return nil, errors.New("世界状态数据解析失败")
-	}
-	return &env, nil
+	return parseWorldStateEnvelope[wsAlertEnvelope]("alert")
 }
 
 // —— 钢铁奖励（本地计算，对齐 Java SteelPathOffering）——
