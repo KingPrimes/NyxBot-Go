@@ -306,7 +306,7 @@ func TestSubscribeEnumsAndPagination(t *testing.T) {
 	// 枚举
 	recorder := doRequest(t, r, http.MethodGet, "/data/warframe/subscribe/sub", token, "")
 	var envelope struct {
-		Code int             `json:"code"`
+		Code int              `json:"code"`
 		Data []enumOptionTest `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
