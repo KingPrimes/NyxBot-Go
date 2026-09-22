@@ -571,7 +571,7 @@ func cleanupEmptyUser(subuID uint, subscriptionID uint) {
 	removeSubscriptionIfEmpty(subscriptionID)
 }
 
-// 便捷转换辅助。
+// missionToStr returns the mission type value, or an empty string when it is unspecified.
 func missionToStr(m *nyxbot.MissionType) string {
 	if m == nil {
 		return ""
@@ -579,6 +579,7 @@ func missionToStr(m *nyxbot.MissionType) string {
 	return string(*m)
 }
 
+// invasionToStr returns the reward value, or an empty string when it is unspecified.
 func invasionToStr(r *nyxbot.InvasionReward) string {
 	if r == nil {
 		return ""
@@ -586,6 +587,7 @@ func invasionToStr(r *nyxbot.InvasionReward) string {
 	return string(*r)
 }
 
+// tierOrZero returns the tier value, or zero when it is unspecified.
 func tierOrZero(t *int) int {
 	if t == nil {
 		return 0
@@ -593,6 +595,7 @@ func tierOrZero(t *int) int {
 	return *t
 }
 
+// atoiOrZero trims and parses a decimal integer, returning zero for invalid input.
 func atoiOrZero(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
