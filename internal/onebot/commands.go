@@ -33,9 +33,10 @@ type CommandRegistry struct {
 	access  *AccessChecker
 	started time.Time
 
-	mu         sync.RWMutex
-	handlers   map[nyxbot.Codes]CommandHandler
-	registered bool
+	mu           sync.RWMutex
+	handlers     map[nyxbot.Codes]CommandHandler
+	dataExecutor DataUpdateExecutor
+	registered   bool
 }
 
 // NewCommandRegistry 创建基础指令注册器。
@@ -55,6 +56,7 @@ func newCommandRegistry(pluginPrefixProvider func() bool) *CommandRegistry {
 	}
 	registry.handlers[nyxbot.CmdHelp] = registry.help
 	registry.handlers[nyxbot.CmdCheckVersion] = registry.systemInfo
+	registry.installStageCommands()
 	return registry
 }
 
