@@ -565,12 +565,10 @@ func cleanupEmptyUser(subuID uint, subscriptionID uint) {
 	if remaining > 0 {
 		return
 	}
+	// 用户已无规则：连同其残留规则一并清理，避免产生孤儿规则
+	deleteRulesOfUser(subuID)
 	database.DB.Delete(&modelwarframe.MissionSubscribeUser{}, subuID)
-	var users int64
-	database.DB.Model(&modelwarframe.MissionSubscribeUser{}).Where("sub_id = ?", subscriptionID).Count(&users)
-	if users == 0 {
-		database.DB.Delete(&modelwarframe.MissionSubscribe{}, subscriptionID)
-	}
+	removeSubscriptionIfEmpty(subscriptionID)
 }
 
 // 便捷转换辅助。
