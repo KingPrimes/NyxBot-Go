@@ -46,6 +46,14 @@ func NewWorldStateCache() *WorldStateCache {
 	return &WorldStateCache{}
 }
 
+// SetRaw 注入原始 JSON（供测试构造与快照恢复，不触发网络请求）。
+// 与 store 不同，此方法不反序列化 state，仅填充查询所需的 raw。
+func (cache *WorldStateCache) SetRaw(raw []byte) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.raw = raw
+}
+
 // Raw 返回最近一次成功拉取的原始 JSON 字节。
 func (cache *WorldStateCache) Raw() []byte {
 	cache.mu.RLock()

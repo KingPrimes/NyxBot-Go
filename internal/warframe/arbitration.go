@@ -33,6 +33,7 @@ type Arbitration struct {
 	Activation string `json:"activation"` // 开始时间（RFC3339）
 	Expiry     string `json:"expiry"`     // 结束时间（RFC3339）
 	Node       string `json:"node"`       // 节点
+	Planet     string `json:"planet"`     // 行星
 	Enemy      string `json:"enemy"`      // 敌人派系
 	EnemyLv    int    `json:"enemyLv"`    // 敌人等级
 	Type       string `json:"type"`       // 任务类型
@@ -247,4 +248,23 @@ var userAgentVersion = func() string {
 // SetUserAgentVersion 供 main 注入版本号（对齐 Java 的 NyxBot/{jarVersion}）。
 func SetUserAgentVersion(version string) {
 	userAgentVersion = func() string { return version }
+}
+
+var (
+	defaultArbitrationOnce sync.Once
+	defaultArbitration     *ArbitrationCache
+)
+
+// DefaultArbitration 返回进程级默认仲裁缓存，首次调用时懒初始化为文件或远程数据。
+// 初始化失败仅导致空数据（指令会提示暂无仲裁），不阻塞调用方。
+// 注意：首次调用会同步尝试初始化（含网络重试），最坏可能阻塞数秒；如需预热请提前调用。
+func DefaultArbitration() *ArbitrationCache {
+	defaultArbitrationOnce.Do(func() {
+		cache := NewArbitrationCache(&http.Client{Timeout: 15 * time.Second})
+		if err := cache.Init(); err != nil {
+			logging.WarnPack("warframe.arbitration", "default arbitration init failed: %v", err)
+		}
+		defaultArbitration = cache
+	})
+	return defaultArbitration
 }
