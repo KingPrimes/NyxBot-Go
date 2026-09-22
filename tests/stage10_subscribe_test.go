@@ -42,6 +42,48 @@ func TestSubscribeCodeContract(t *testing.T) {
 	}
 }
 
+// TestSubscribeSubParameterCodeBoundaries verifies the first/last accepted
+// mission and reward codes and rejects their adjacent out-of-range values.
+func TestSubscribeSubParameterCodeBoundaries(t *testing.T) {
+	missionCases := []struct {
+		code int
+		want nyxbot.MissionType
+	}{
+		{1, nyxbot.MTSurvival},
+		{26, nyxbot.MTCorruption},
+	}
+	for _, test := range missionCases {
+		got, ok := warframe.ParseMissionType(test.code)
+		if !ok || got != test.want {
+			t.Errorf("mission code %d = %q, %v; want %q, true", test.code, got, ok, test.want)
+		}
+	}
+	for _, code := range []int{-1, 0, 27} {
+		if got, ok := warframe.ParseMissionType(code); ok {
+			t.Errorf("mission code %d unexpectedly parsed as %q", code, got)
+		}
+	}
+
+	rewardCases := []struct {
+		code int
+		want nyxbot.InvasionReward
+	}{
+		{1, nyxbot.InvRewardDetoniteInjector},
+		{7, nyxbot.InvRewardExilusAdapter},
+	}
+	for _, test := range rewardCases {
+		got, ok := warframe.ParseInvasionReward(test.code)
+		if !ok || got != test.want {
+			t.Errorf("reward code %d = %q, %v; want %q, true", test.code, got, ok, test.want)
+		}
+	}
+	for _, code := range []int{-1, 0, 8} {
+		if got, ok := warframe.ParseInvasionReward(code); ok {
+			t.Errorf("reward code %d unexpectedly parsed as %q", code, got)
+		}
+	}
+}
+
 // TestSubscribeLifecycle 验证订阅/重复/列出/取消的完整流程。
 func TestSubscribeLifecycle(t *testing.T) {
 	setupStage10DB(t)
@@ -118,6 +160,21 @@ func TestUnsubscribeNoMatch(t *testing.T) {
 	// 匹配不到 8-1-3 的规则。
 	if got := warframe.Unsubscribe(groupID, userID, nyxbot.SubFissures, ptr(nyxbot.MTSurvival), ptr(3), nil); got != "未找到匹配的订阅规则" {
 		t.Fatalf("无匹配时应返回未找到: %q", got)
+	}
+	// A negative cancellation must not trigger empty-user cleanup or remove the
+	// unmatched rule, its owner, or the containing group.
+	for name, model := range map[string]any{
+		"subscription groups": &modelwarframe.MissionSubscribe{},
+		"subscription users":  &modelwarframe.MissionSubscribeUser{},
+		"subscription rules":  &modelwarframe.MissionSubscribeUserCheckType{},
+	} {
+		var count int64
+		if err := database.DB.Model(model).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Errorf("%s count = %d after unmatched cancellation, want 1", name, count)
+		}
 	}
 }
 

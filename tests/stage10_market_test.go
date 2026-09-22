@@ -617,6 +617,201 @@ func TestQueryDucatsDumpEmpty(t *testing.T) {
 	}
 }
 
+// TestMarketQueriesRejectMalformedJSON verifies that each changed market query
+// surfaces a parse error instead of returning a partial success for corrupt API data.
+func TestMarketQueriesRejectMalformedJSON(t *testing.T) {
+	setupMarketDB(t)
+	seedMarketItems(t)
+	api := marketTestServer(t, `{`, `{`, `{`)
+
+	tests := []struct {
+		name    string
+		wantErr string
+		query   func() error
+	}{
+		{
+			name:    "orders",
+			wantErr: "parse market orders",
+			query: func() error {
+				_, err := warframe.QueryMarketOrders(api, "loki prime set", false, false, "")
+				return err
+			},
+		},
+		{
+			name:    "riven auctions",
+			wantErr: "parse riven auctions",
+			query: func() error {
+				_, err := warframe.QueryRivenAuctions(api, "rubico prime")
+				return err
+			},
+		},
+		{
+			name:    "lich auctions",
+			wantErr: "parse lich sister auctions",
+			query: func() error {
+				_, err := warframe.QueryLichSisterAuctions(api, "kuva bramma", warframe.LichSisterLich)
+				return err
+			},
+		},
+		{
+			name:    "ducats",
+			wantErr: "parse ducats",
+			query: func() error {
+				_, err := warframe.QueryDucatsDump(api, warframe.DucatsDumpGod)
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.query()
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want error containing %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+// TestQueryRivenAuctionsLimitAndSort covers the ten-result contract at its boundary.
+func TestQueryRivenAuctionsLimitAndSort(t *testing.T) {
+	setupMarketDB(t)
+	seedMarketItems(t)
+
+	auctions := make([]map[string]any, 0, 12)
+	for price := 112; price >= 101; price-- {
+		auctions = append(auctions, map[string]any{
+			"id":             fmt.Sprintf("riven-%d", price),
+			"closed":         false,
+			"visible":        true,
+			"buyout_price":   price,
+			"starting_price": price + 10,
+			"owner":          map[string]any{"status": "online"},
+			"item":           map[string]any{"type": "riven", "weapon_url_name": testRivenSlug},
+		})
+	}
+	body, err := json.Marshal(map[string]any{"payload": map[string]any{"auctions": auctions}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := marketTestServer(t, `[]`, string(body), `{"payload":{}}`)
+
+	result, err := warframe.QueryRivenAuctions(api, "rubico prime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DTO == nil || result.DTO.Payload == nil {
+		t.Fatal("expected a riven auction payload")
+	}
+	got := result.DTO.Payload.Auctions
+	if len(got) != 10 {
+		t.Fatalf("auction count = %d, want 10", len(got))
+	}
+	for i, auction := range got {
+		wantPrice := 101 + i
+		if auction.BuyoutPrice == nil || *auction.BuyoutPrice != wantPrice {
+			t.Fatalf("auction[%d] price = %v, want %d", i, auction.BuyoutPrice, wantPrice)
+		}
+	}
+}
+
+// TestQueryLichSisterAuctionsLimitAndSort covers sorting and truncation with
+// more than ten otherwise valid auctions.
+func TestQueryLichSisterAuctionsLimitAndSort(t *testing.T) {
+	setupMarketDB(t)
+	seedMarketItems(t)
+
+	auctions := make([]map[string]any, 0, 12)
+	for price := 212; price >= 201; price-- {
+		auctions = append(auctions, map[string]any{
+			"id":           fmt.Sprintf("lich-%d", price),
+			"closed":       false,
+			"visible":      true,
+			"buyout_price": price,
+			"owner":        map[string]any{"status": "ingame"},
+			"item":         map[string]any{"element": "cold", "weapon_url_name": testLichSlug},
+		})
+	}
+	body, err := json.Marshal(map[string]any{"payload": map[string]any{"auctions": auctions}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := marketTestServer(t, `[]`, string(body), `{"payload":{}}`)
+
+	result, err := warframe.QueryLichSisterAuctions(api, "kuva bramma", warframe.LichSisterLich)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DTO == nil || result.DTO.Payload == nil {
+		t.Fatal("expected a lich auction payload")
+	}
+	got := result.DTO.Payload.Auctions
+	if len(got) != 10 {
+		t.Fatalf("auction count = %d, want 10", len(got))
+	}
+	for i, auction := range got {
+		wantPrice := 201 + i
+		if auction.BuyoutPrice == nil || *auction.BuyoutPrice != wantPrice {
+			t.Fatalf("auction[%d] price = %v, want %d", i, auction.BuyoutPrice, wantPrice)
+		}
+		if auction.Item == nil || auction.Item.Element != drawplugin.ElemCold {
+			t.Fatalf("auction[%d] element was not normalized: %+v", i, auction.Item)
+		}
+	}
+}
+
+// TestQueryDucatsDumpBoundariesAndLimit verifies the inclusive/exclusive
+// currency boundaries and the ten-entry descending-ratio cap.
+func TestQueryDucatsDumpBoundariesAndLimit(t *testing.T) {
+	setupMarketDB(t)
+	seedMarketItems(t)
+
+	entries := make([]map[string]any, 0, 16)
+	for ratio := 1; ratio <= 12; ratio++ {
+		entries = append(entries, map[string]any{
+			"item": testDucatGoldID, "ducats": 100, "ducats_per_platinum_wa": ratio,
+		})
+	}
+	entries = append(entries,
+		map[string]any{"item": testDucatSilverID, "ducats": 45, "ducats_per_platinum_wa": 4.5},
+		map[string]any{"item": "silver-upper", "ducats": 99, "ducats_per_platinum_wa": 9.9},
+		map[string]any{"item": "too-low", "ducats": 44, "ducats_per_platinum_wa": 99.0},
+		map[string]any{"item": "too-high", "ducats": 101, "ducats_per_platinum_wa": 99.0},
+	)
+	body, err := json.Marshal(map[string]any{
+		"payload": map[string]any{"previous_day": entries, "previous_hour": []any{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := marketTestServer(t, `[]`, `{"payload":{"auctions":[]}}`, string(body))
+
+	gold, err := warframe.QueryDucatsDump(api, warframe.DucatsDumpGod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gold == nil || len(gold.Day) != 10 {
+		t.Fatalf("gold entries = %+v, want exactly 10", gold)
+	}
+	for i, entry := range gold.Day {
+		wantRatio := float64(12 - i)
+		if entry.Ducats != 100 || entry.DucatsPerPlatinumWa != wantRatio {
+			t.Fatalf("gold[%d] = %+v, want ducats=100 ratio=%v", i, entry, wantRatio)
+		}
+	}
+
+	silver, err := warframe.QueryDucatsDump(api, warframe.DucatsDumpSilver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if silver == nil || len(silver.Day) != 2 {
+		t.Fatalf("silver entries = %+v, want lower and upper boundary entries", silver)
+	}
+	if silver.Day[0].Ducats != 99 || silver.Day[1].Ducats != 45 {
+		t.Fatalf("silver boundaries or ordering are wrong: %+v", silver.Day)
+	}
+}
+
 // TestDrawMarketDucatsNonEmpty 验证金/银垃圾图与市场三图的非空绘制。
 func TestDrawMarketDucatsNonEmpty(t *testing.T) {
 	dump := &draw.Ducats{

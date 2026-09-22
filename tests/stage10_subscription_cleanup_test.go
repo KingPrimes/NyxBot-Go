@@ -153,6 +153,30 @@ func TestSubscriptionCleanupWithoutSubscription(t *testing.T) {
 	}
 }
 
+// TestSubscriptionCleanupUnknownMemberPreservesGroup verifies that a leave
+// notice for a user with no subscription cannot remove another member's data.
+func TestSubscriptionCleanupUnknownMemberPreservesGroup(t *testing.T) {
+	setupSubscriptionCleanupTest(t)
+	const groupID, botUID = int64(90007), int64(10001)
+	const subscribedUser, unknownUser = int64(20010), int64(29999)
+
+	subID := newSubscriptionGroup(t, groupID)
+	userPK := addSubscriptionUser(t, subID, subscribedUser, nyxbot.SubArbitration)
+
+	warframe.HandleGroupDecrease(groupID, unknownUser, botUID)
+	time.Sleep(50 * time.Millisecond)
+
+	if count := countRows(t, &modelwarframe.MissionSubscribe{}, "id = ?", subID); count != 1 {
+		t.Fatalf("subscription group count = %d, want 1", count)
+	}
+	if count := countRows(t, &modelwarframe.MissionSubscribeUser{}, "id = ?", userPK); count != 1 {
+		t.Fatalf("subscribed user count = %d, want 1", count)
+	}
+	if count := countRows(t, &modelwarframe.MissionSubscribeUserCheckType{}, "subu_id = ?", userPK); count != 1 {
+		t.Fatalf("subscribed user's rule count = %d, want 1", count)
+	}
+}
+
 // TestSubscriptionCleanupViaNoticeEvent 验证 group_decrease 通知经 CommandRegistry
 // 的事件派发链路触发清理（含非本事件类型不触发的反向断言）。
 func TestSubscriptionCleanupViaNoticeEvent(t *testing.T) {
