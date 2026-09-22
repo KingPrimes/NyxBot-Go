@@ -102,5 +102,3 @@ func drawHelpTag(canvas *Canvas, cmd string, x, y, w, h, radius, pad float64, do
 	canvas.SetColor(textColor).SetFontSize(22)
 	canvas.AddText(cmd, x+pad+20, y+h/2+8)
 }
-
-

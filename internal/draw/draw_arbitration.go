@@ -223,5 +223,3 @@ func drawArbitrationCard(canvas *Canvas, a *Arbitration, cardX, cardY, cardW, ca
 func scaleByPct(w, h, pct float64) (int, int) {
 	return int(w * pct), int(h * pct)
 }
-
-
