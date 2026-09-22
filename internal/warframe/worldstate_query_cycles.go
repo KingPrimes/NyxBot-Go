@@ -11,11 +11,9 @@
 package warframe
 
 import (
-	"encoding/json"
 	"time"
 
 	"nyxbot-go/internal/draw"
-	"nyxbot-go/internal/logging"
 	"nyxbot-go/internal/warframe/cycle"
 )
 
@@ -62,13 +60,8 @@ func GetAllCycle() (*draw.AllCycle, error) {
 // syndicateBountyExpiry 返回指定集团赏金的结束时间戳（毫秒）；未找到时回退当前时间。
 // 读取失败（WorldState 未就绪/解析失败）同样回退，保证平原查询不因缺数据整体失败。
 func syndicateBountyExpiry(tag string) int64 {
-	raw := DefaultWorldState().Raw()
-	if len(raw) == 0 {
-		return time.Now().UnixMilli()
-	}
-	var env wsCycleEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		logging.WarnPack("warframe.status", "parse cycle envelope failed: %v", err)
+	env, err := parseWorldStateEnvelope[wsCycleEnvelope]("cycle")
+	if err != nil {
 		return time.Now().UnixMilli()
 	}
 	for i := range env.SyndicateMissions {
