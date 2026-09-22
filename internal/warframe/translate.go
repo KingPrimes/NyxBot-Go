@@ -58,6 +58,26 @@ func TranslateStateName(uniqueName string) string {
 	return uniqueName
 }
 
+// TranslateStateNameDirect 按原始 uniqueName 直接查 state_translation（不做 last3 段截取）。
+// 用于 Java 侧同样直接 findByUniqueName 的场景：警报奖励物品、1999 日历事件字段等。
+// 未命中或数据库不可用时回退原文。
+func TranslateStateNameDirect(uniqueName string) string {
+	if uniqueName == "" || database.DB == nil {
+		return uniqueName
+	}
+	var st modelwarframe.StateTranslation
+	if err := database.DB.Where("unique_name = ?", uniqueName).First(&st).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			logging.DebugPack("warframe.translate", "query state_translation %q failed: %v", uniqueName, err)
+		}
+		return uniqueName
+	}
+	if st.Name != "" {
+		return st.Name
+	}
+	return uniqueName
+}
+
 // getLastThreeSegments 取 uniqueName 最后三段（对齐 Java StringUtils.getLastThreeSegments，
 // 用于 state_translation 翻译命中：/Lotus/StoreItems/A/B → StoreItems/A/B）。
 func getLastThreeSegments(value string) string {

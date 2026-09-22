@@ -139,7 +139,7 @@ func drawAlertCard(canvas *Canvas, alert *Alert, cardX, cardY, cardW int) {
 		if info, ok := drawplugin.MissionTypeMap[mi.MissionType]; ok {
 			mtName = info.Name
 		}
-		canvas.SetColor(missionTypeColor(mi.MissionType)).SetFontSize(22)
+		canvas.SetColor(MissionTypeColor(mi.MissionType)).SetFontSize(22)
 		canvas.AddText(mtName, float64(cursorX), float64(badgeY+3))
 		cursorX += int(canvas.StringWidth(mtName)) + 10
 	}

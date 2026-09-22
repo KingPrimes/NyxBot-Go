@@ -128,8 +128,9 @@ func lighten(c color.RGBA) color.RGBA {
 	}
 }
 
-// missionTypeColor 任务类型颜色（对齐 Java MissionTypeEnum.getColor，未知/空类型回退黑色）。
-func missionTypeColor(mt drawplugin.MissionType) color.RGBA {
+// MissionTypeColor 任务类型颜色（对齐 Java MissionTypeEnum.getColor，未知/空类型回退黑色）。
+// 导出供 warframe 查询层为其它含任务类型的图（如执刑官猎杀）取同一套配色。
+func MissionTypeColor(mt drawplugin.MissionType) color.RGBA {
 	switch mt {
 	case drawplugin.MTAssassination:
 		return color.RGBA{0xff, 0x6b, 0x6b, 0xff} // 刺杀 - 红色
@@ -310,7 +311,7 @@ func drawFissureCard(canvas *Canvas, m *ActiveMission, cardX, cardY, cardW, card
 
 	// 行 2：任务类型 + 派系（居中）
 	mt := m.missionTypeName()
-	mtCol := missionTypeColor(m.MissionType)
+	mtCol := MissionTypeColor(m.MissionType)
 	fn, fnOK := m.factionInfo()
 	row2Y := cardY + 85
 	canvas.SetFontSize(bodySize)
