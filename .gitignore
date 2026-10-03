@@ -13,6 +13,9 @@ admin-credentials.txt
 # 只忽略仓库根这个早期迭代遗留的废弃文件；build/windows/versioninfo.json 是
 # build.ps1 与 Windows CI 打包必需的（原来无斜杠的写法会连它一起忽略，导致 CI 里没有该文件）
 /versioninfo.json
+# 运行期配置：不入库（缺失时 config.Load 会生成默认值，含随机 JWT 密钥；
+# 一旦入库，这个签名密钥就会随公开仓库泄露）
+/config.yaml
 AGENTS.md
 CLAUDE.md
 plans/
