@@ -193,4 +193,48 @@ func TestSubscribeInvalidParams(t *testing.T) {
 	}
 }
 
+// TestParseSubscribeCommandStrict 验证订阅参数严格校验：
+// 保留空段不压缩、按订阅类型拒绝多余段、裂隙等级只接受 1~5，任何不合法输入都拒绝。
+func TestParseSubscribeCommandStrict(t *testing.T) {
+	valid := []string{
+		"1",     // 仲裁（无子参数）
+		"1-2",   // 仲裁 + 任务类型
+		"5",     // 入侵（无子参数）
+		"5-1",   // 入侵 + 奖励类型
+		"8",     // 裂隙（无子参数）
+		"8-1",   // 裂隙 + 任务类型
+		"8-1-4", // 裂隙 + 任务类型 + 等级
+		"9",     // 无参数类型
+	}
+	for _, raw := range valid {
+		cmd := &warframe.SubscribeCommand{}
+		if !warframe.ParseSubscribeCommand(cmd, raw) {
+			t.Fatalf("合法输入被拒绝: %q", raw)
+		}
+	}
+
+	invalid := []struct{ raw, why string }{
+		{"", "空串"},
+		{"0", "订阅类型编号越界（0）"},
+		{"14", "订阅类型编号越界（14）"},
+		{"-8", "首段为空"},
+		{"8-", "尾段为空"},
+		{"8--4", "中间空段不得被压缩成 8-4"},
+		{"8-1-4-7", "裂隙多余段"},
+		{"8-1-0", "裂隙等级 0 越界"},
+		{"8-1-6", "裂隙等级 6 越界"},
+		{"8-abc", "任务类型非数字"},
+		{"8-1-abc", "裂隙等级非数字"},
+		{"9-2", "无参数类型不接受多余段"},
+		{"1-2-3", "仲裁多余段"},
+		{"5-1-2", "入侵多余段"},
+	}
+	for _, tc := range invalid {
+		cmd := &warframe.SubscribeCommand{}
+		if warframe.ParseSubscribeCommand(cmd, tc.raw) {
+			t.Fatalf("非法输入被接受（%s）: %q -> %+v", tc.why, tc.raw, cmd)
+		}
+	}
+}
+
 func ptr[T any](v T) *T { return &v }

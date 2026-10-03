@@ -4,6 +4,7 @@ package tests
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,5 +284,64 @@ func TestSubscriptionCleanupIgnoresOtherGroup(t *testing.T) {
 	}
 	if count := countRows(t, &modelwarframe.MissionSubscribeUserCheckType{}, "subu_id = ?", otherUserPK); count != 1 {
 		t.Fatal("其它群用户规则被误删")
+	}
+}
+
+// TestSubscriptionCleanupKeepsResubscribedRecords 验证延迟兜底清理不会删除抖动窗口期内重建的订阅。
+//
+// 回归背景：`findOrCreateSubscription`/`findOrCreateUser` 会复用已存在记录（按 `sub_group`、
+// 按 `(sub_id,user_id)`）。若旧记录在窗口期内仍留在库中，窗口期内重建的订阅会复用同一主键，
+// 延迟任务按 `sub_id`/`user_id` 反查时会把新记录一并删除（数据丢失）。
+// 正确顺序：事件到达时先快照旧用户主键并**立即**删除旧记录，延迟阶段只按快照主键兜底
+// （三张表主键均为 AUTOINCREMENT，主键不复用，故快照不会命中新记录）。
+func TestSubscriptionCleanupKeepsResubscribedRecords(t *testing.T) {
+	setupSubscriptionCleanupTest(t)
+	const delay = 300 * time.Millisecond
+	warframe.SetSubscriptionCleanupDelay(delay)
+
+	const groupID, botUID, userID = int64(91001), int64(10001), int64(21001)
+	oldSubID := newSubscriptionGroup(t, groupID)
+	oldUserPK := addSubscriptionUser(t, oldSubID, userID, nyxbot.SubArbitration)
+
+	// 成员退群：旧订阅组/旧用户/旧规则都必须在进入延迟窗口之前就被清掉
+	warframe.HandleGroupDecrease(groupID, userID, botUID)
+	if count := countRows(t, &modelwarframe.MissionSubscribe{}, "id = ?", oldSubID); count != 0 {
+		t.Fatal("旧订阅组应在延迟前立即删除")
+	}
+	if count := countRows(t, &modelwarframe.MissionSubscribeUser{}, "id = ?", oldUserPK); count != 0 {
+		t.Fatal("旧订阅用户应在延迟前立即删除")
+	}
+	if count := countRows(t, &modelwarframe.MissionSubscribeUserCheckType{}, "subu_id = ?", oldUserPK); count != 0 {
+		t.Fatal("旧用户规则应在延迟前立即删除")
+	}
+
+	// 抖动窗口内重新订阅：旧记录已删除，只能新建（新主键）
+	cmd := &warframe.SubscribeCommand{BotUID: botUID, GroupID: groupID, GroupName: "测试群", UserID: userID, UserName: "测试用户"}
+	if !warframe.ParseSubscribeCommand(cmd, "1") {
+		t.Fatal("解析订阅参数 1 失败")
+	}
+	if got := warframe.Subscribe(cmd); !strings.Contains(got, "订阅成功") {
+		t.Fatalf("窗口期内重新订阅应成功: %q", got)
+	}
+
+	// 等待延迟兜底任务执行完毕（此处断言的是「延迟任务什么都没删」，只能等过延迟）
+	time.Sleep(delay + 700*time.Millisecond)
+
+	var newSub modelwarframe.MissionSubscribe
+	if err := database.DB.Where("sub_group = ?", groupID).First(&newSub).Error; err != nil {
+		t.Fatalf("重新订阅的订阅组被延迟任务删除: %v", err)
+	}
+	if newSub.ID == oldSubID {
+		t.Fatalf("新订阅组复用了旧主键 %d（AUTOINCREMENT 不应复用）", oldSubID)
+	}
+	var newUser modelwarframe.MissionSubscribeUser
+	if err := database.DB.Where("sub_id = ?", newSub.ID).First(&newUser).Error; err != nil {
+		t.Fatalf("重新订阅的用户记录被延迟任务删除: %v", err)
+	}
+	if newUser.ID == oldUserPK {
+		t.Fatalf("新用户记录复用了旧主键 %d", oldUserPK)
+	}
+	if count := countRows(t, &modelwarframe.MissionSubscribeUserCheckType{}, "subu_id = ?", newUser.ID); count != 1 {
+		t.Fatalf("重新订阅的规则被延迟任务删除，剩余 %d 条", count)
 	}
 }
