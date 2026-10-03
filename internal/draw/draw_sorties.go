@@ -58,7 +58,7 @@ func DrawSorties(sorties *Sortie) []byte {
 
 	y := 160
 
-	// Boss + 结束时间
+	// Boss + 结束时间（同一行：Boss 左对齐，结束时间按内容右边界右对齐，零值不显示）
 	y += rowHeight
 	canvas.SetColor(textColor).SetFontSize(28)
 	boss := sorties.Boss
@@ -66,6 +66,12 @@ func DrawSorties(sorties *Sortie) []byte {
 		boss = "未知"
 	}
 	canvas.AddText("Boss: "+boss, float64(imageMargin), float64(y))
+	if !sorties.Expiry.IsZero() {
+		expiry := "结束时间: " + timeDeltaString(time.Until(sorties.Expiry))
+		// 右对齐而非照搬执刑官猎杀图的固定 x：最长 Boss 名（Councilor Vay Hek）
+		// 已排到 x=387，固定 x=390 只剩 3px 间距，改用内容右边界可避免碰撞
+		canvas.AddText(expiry, float64(contentX+contentW)-canvas.StringWidth(expiry), float64(y))
+	}
 
 	// 任务列表标题
 	y += rowHeight + 10

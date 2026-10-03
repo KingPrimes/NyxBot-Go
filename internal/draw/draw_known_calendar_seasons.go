@@ -112,7 +112,9 @@ func DrawKnownCalendarSeasons(list []*KnownCalendarSeasons) []byte {
 	standingX := colX[1]
 	var totalHeight int
 	if isOdd {
-		totalHeight = maxI(colEndY[0], colEndY[1]+cardW)
+		// 奇数布局最后一张卡在左列且为最高列；页脚画在 totalHeight-25（基线），
+		// 多留 40px 底部间距才能让页脚整体落在卡片底边之下（30px 时上沿仍压住卡片约 8px）
+		totalHeight = maxI(colEndY[0], colEndY[1]+cardW) + 40
 	} else {
 		maxEnd := contentStartY
 		for c := range colEndY {
