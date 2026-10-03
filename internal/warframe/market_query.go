@@ -31,25 +31,30 @@ type MarketOrdersResult struct {
 	Orders        []*draw.OrderWithUser // 过滤排序后的订单
 }
 
-// defaultMarketOnce/defaultMarket 进程级默认市场 API 客户端（复用 120s URL 缓存）。
+// defaultMarketMu/defaultMarket 进程级默认市场 API 客户端（复用 120s URL 缓存）。
+// 用互斥锁而非 sync.Once：SetDefaultMarketAPI(nil) 之后必须能按需重建，
+// 否则 once 已触发、defaultMarket 为 nil，后续调用方会解引用空指针。
 var (
-	defaultMarketOnce sync.Once
-	defaultMarket     *MarketAPI
+	defaultMarketMu sync.Mutex
+	defaultMarket   *MarketAPI
 )
 
-// DefaultMarketAPI 返回进程级默认市场 API 客户端。
+// DefaultMarketAPI 返回进程级默认市场 API 客户端；为 nil 时按需创建，永不返回 nil。
 // 单次请求超时由 doRequestWithRetry 统一控制（config.yaml 的 warframe.http_retry_*）。
 func DefaultMarketAPI() *MarketAPI {
-	defaultMarketOnce.Do(func() {
+	defaultMarketMu.Lock()
+	defer defaultMarketMu.Unlock()
+	if defaultMarket == nil {
 		defaultMarket = NewMarketAPI(nil)
-	})
+	}
 	return defaultMarket
 }
 
 // SetDefaultMarketAPI 替换进程级默认市场 API 客户端（供黑盒测试注入本地服务器）。
-// 传 nil 时恢复为按需懒初始化。
+// 传 nil 时清除当前实例，下次 DefaultMarketAPI() 会重新按需创建。
 func SetDefaultMarketAPI(api *MarketAPI) {
-	defaultMarketOnce.Do(func() {})
+	defaultMarketMu.Lock()
+	defer defaultMarketMu.Unlock()
 	defaultMarket = api
 }
 
@@ -75,7 +80,7 @@ func QueryMarketOrders(api *MarketAPI, keyword string, buyer, maxRank bool, plat
 	}
 
 	result := &MarketOrdersResult{Slug: item.Slug}
-	result.Orders = filterMarketOrders(orders, item.ID, buyer, maxRank, item.MaxRank)
+	result.Orders = filterMarketOrders(orders, item.ID, buyer, maxRank, item.MaxRank, item.MaxAmberStars, item.MaxCyanStars)
 	result.Item = buildOrdersDrawInput(item, result.Orders, reqMastery, tradingTax, buyer, maxRank, platform)
 	return result, nil
 }
@@ -283,7 +288,7 @@ func fetchMarketOrders(api *MarketAPI, slug, platform string) ([]*draw.OrderWith
 
 // filterMarketOrders 过滤并排序订单（对齐 Java MarketOrderUtils.market）：
 // 在线用户 → 物品 ID 命中 → 买卖方向 → 满级/满星 → 价格排序（买家取高、卖家取低）→ 截断 8 条。
-func filterMarketOrders(orders []*draw.OrderWithUser, itemID string, buyer, maxRank bool, maxRankValue int) []*draw.OrderWithUser {
+func filterMarketOrders(orders []*draw.OrderWithUser, itemID string, buyer, maxRank bool, maxRankValue, maxAmberStars, maxCyanStars int) []*draw.OrderWithUser {
 	want := drawplugin.TransSell
 	if buyer {
 		want = drawplugin.TransBuy
@@ -302,7 +307,7 @@ func filterMarketOrders(orders []*draw.OrderWithUser, itemID string, buyer, maxR
 		if order.Type != want {
 			continue
 		}
-		if !matchesMaxRank(maxRank, maxRankValue, order) {
+		if !matchesMaxRank(maxRank, maxRankValue, maxAmberStars, maxCyanStars, order) {
 			continue
 		}
 		filtered = append(filtered, order)
@@ -321,9 +326,11 @@ func filterMarketOrders(orders []*draw.OrderWithUser, itemID string, buyer, maxR
 	return filtered
 }
 
-// matchesMaxRank 判定订单是否满足满级条件（对齐 Java matchesMaxRank）：
-// 有 rank 时按 rank 比对；否则有琥珀/靛蓝星时按星数比对；均无则视为满足。
-func matchesMaxRank(maxRank bool, maxRankValue int, order *draw.OrderWithUser) bool {
+// matchesMaxRank 判定订单是否满足满级条件（对齐 Java matchesMaxRank 的判空结构）：
+// 有 rank 时按物品 maxRank 比对；否则按琥珀星/靛蓝星**各自**的上限比对
+// （阿耶檀识塑像的 maxRank 为 0，星际上限存在 maxAmberStars/maxCyanStars 且两者常不相等）；
+// 均无则视为满足。
+func matchesMaxRank(maxRank bool, maxRankValue, maxAmberStars, maxCyanStars int, order *draw.OrderWithUser) bool {
 	if !maxRank {
 		return true
 	}
@@ -331,7 +338,7 @@ func matchesMaxRank(maxRank bool, maxRankValue int, order *draw.OrderWithUser) b
 		return *order.Rank == maxRankValue
 	}
 	if order.AmberStars != nil && order.CyanStars != nil {
-		return *order.AmberStars == maxRankValue && *order.CyanStars == maxRankValue
+		return *order.AmberStars == maxAmberStars && *order.CyanStars == maxCyanStars
 	}
 	return true
 }

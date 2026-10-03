@@ -212,13 +212,17 @@ func GetSteelPath() *draw.SteelPathOffering {
 	}
 }
 
-// endOfSteelPathWeek 返回本周结束时刻（下周一 00:00 本地时间，对齐 Java TimeUtils.getLastDayOfWeek）。
+// endOfSteelPathWeek 返回本周结束时刻（下周一 00:00 UTC）。
+// 轮换基准 steelPathStartDate 是 2020-11-16 00:00 UTC（周一），周索引按 UTC 计算，
+// 因此边界也必须用 UTC 求星期与当日零点；否则本地时区（如 Asia/Shanghai）会偏差 8 小时，
+// 剩余时间会比真实换档时刻提前归零。
 func endOfSteelPathWeek(t time.Time) time.Time {
-	weekday := int(t.Weekday()) // Sunday = 0
+	utc := t.UTC()
+	weekday := int(utc.Weekday()) // Sunday = 0
 	if weekday == 0 {
 		weekday = 7 // 把周日当作一周第 7 天
 	}
 	daysUntilNextMonday := 8 - weekday
-	startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	startOfDay := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 	return startOfDay.AddDate(0, 0, daysUntilNextMonday)
 }
