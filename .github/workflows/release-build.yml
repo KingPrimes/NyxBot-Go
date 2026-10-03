@@ -2,6 +2,12 @@ name: Release Build
 
 on:
   workflow_dispatch:
+    inputs:
+      webui_ref:
+        description: "可选：固定 NyxBot-WebUI 的 ref（分支 / 标签 / 提交 SHA）。留空 = 默认分支（最新）；也可用仓库变量 WEBUI_REF 固定（tag 触发的发布同样生效）"
+        required: false
+        type: string
+        default: ""
   push:
     tags:
       - "v*"
@@ -52,8 +58,22 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.WEBUI_REPOSITORY }}
+          # 可选固定前端 ref：workflow_dispatch 输入优先，其次仓库变量 WEBUI_REF；两者都为空则取默认分支（最新）
+          ref: ${{ inputs.webui_ref || vars.WEBUI_REF }}
           path: NyxBot-WebUI
           persist-credentials: false
+      - name: Report frontend revision
+        working-directory: NyxBot-WebUI
+        shell: bash
+        env:
+          # 经 env 传入而不是插值进脚本，避免 ref 里的引号/分号被 shell 解释
+          REQUESTED_REF: ${{ inputs.webui_ref }}
+          REPO_VAR_REF: ${{ vars.WEBUI_REF }}
+        run: |
+          # 把实际用到的前端提交打进发布日志，便于回溯某个二进制内嵌的是哪版前端
+          echo "frontend commit : $(git rev-parse HEAD)"
+          echo "frontend subject: $(git log -1 --format='%s')"
+          echo "requested ref   : '${REQUESTED_REF}' (repo variable WEBUI_REF='${REPO_VAR_REF}')"
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:

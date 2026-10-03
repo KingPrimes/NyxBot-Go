@@ -170,3 +170,11 @@ resources/static/             # 前端构建产物（不入库，保留 .gitkeep
 并推送多架构 Docker 镜像到 `kingprimes/nyxbot-go`（Docker Hub）与 `ghcr.io/<owner>/nyxbot-go`。
 该工作流先由 `frontend` job 拉取 `KingPrimes/NyxBot-WebUI` 执行 `pnpm build`，把产物下发给各平台后再编译
 （前端因此内嵌在二进制里）；Docker 镜像直接复用 CI 构建的 linux 产物，不在镜像内重复编译，也无需再拷贝 `resources`。
+
+前端版本**默认取该仓库默认分支的最新提交**。需要固定（例如前端改了不兼容的接口、或想让某个发布可复现）时二选一：
+
+- 手动触发时填 `webui_ref`：分支 / 标签 / 提交 SHA；
+- 在仓库 `Settings → Secrets and variables → Actions → Variables` 建 `WEBUI_REF`：tag 触发的发布同样生效，适合长期钉住某个前端版本。
+
+优先级为 `webui_ref` > `WEBUI_REF` > 默认分支；构建日志会打印实际用到的前端 commit
+（`frontend commit : <sha>`），便于回溯某个二进制里内嵌的是哪版前端。
