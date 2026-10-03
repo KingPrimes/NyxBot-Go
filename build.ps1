@@ -30,10 +30,19 @@ if (-not (Get-Command goversioninfo -ErrorAction SilentlyContinue)) {
   throw "goversioninfo not found, install it with: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest"
 }
 goversioninfo -icon="build/icons/windows.ico" -o="cmd/server/resource.syso" "build/windows/versioninfo.json"
+if ($LASTEXITCODE -ne 0) {
+  throw "goversioninfo failed with exit code $LASTEXITCODE"
+}
 
 $ldflags = "-X nyxbot-go/internal/version.Version=$($metadata.version) -X nyxbot-go/internal/version.Commit=local"
 $exeName = "$($metadata.executableName).exe"
 go build -ldflags $ldflags -o $exeName ./cmd/server
+# $ErrorActionPreference 管不到原生命令的退出码（$PSNativeCommandUseErrorActionPreference 默认 False），
+# 不显式检查的话：编译失败时若上一轮遗留的 $exeName 还在，下面的 Get-Item 会成功，
+# 于是脚本照旧打印 "Built ..."，把失败报成成功。
+if ($LASTEXITCODE -ne 0) {
+  throw "go build failed with exit code $LASTEXITCODE; $exeName was not updated"
+}
 
 $exeSizeMB = [math]::Round(((Get-Item -LiteralPath $exeName).Length / 1MB), 2)
 Write-Host "Built $exeName ($exeSizeMB MB, frontend embedded) with Windows icon and version info."

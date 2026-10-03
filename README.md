@@ -46,19 +46,25 @@ POST http://localhost:8080/api/auth/login
 ## 托管前端（编译期内嵌）
 
 前端源码不在本仓库，构建产物也不入库（`resources/static` 被 `.gitignore` 排除）。
-打包前先构建前端并把它放进本仓库的 `resources/`：
+打包前先构建前端并把它放进本仓库的 `resources/`。下面的命令**起点是 NyxBot-Go 仓库根目录**，
+且假定 `NyxBot-WebUI` 与它同级：
 
 ```bash
-# 1. 构建前端
+# 1. 构建前端（产物落在 ../NyxBot-WebUI/resources；已经 clone 过就跳过 git clone）
+cd ..
 git clone https://github.com/KingPrimes/NyxBot-WebUI.git
-cd NyxBot-WebUI && pnpm install && pnpm build   # 产物在 NyxBot-WebUI/resources
+cd NyxBot-WebUI
+pnpm install
+pnpm build
 
-# 2. 把产物拷进本仓库（static 与 templates 都要）
-#    resources/static      -> NyxBot-Go/resources/static
-#    resources/templates   -> NyxBot-Go/resources/templates
+# 2. 把产物拷进后端仓库的 resources/（static 与 templates 都要，SPA 入口 index.html 在 templates 里）
+#    源写成 "目录/." 表示拷贝目录内容，这样目标目录已存在时不会被多套一层
+cp -r resources/static/.    ../NyxBot-Go/resources/static/
+cp -r resources/templates/. ../NyxBot-Go/resources/templates/
 
-# 3. 编译：go:embed 会把 resources 打进可执行文件
-cd NyxBot-Go && go build -o NyxBot ./cmd/server
+# 3. 回到后端仓库再编译：go:embed 会把 resources/ 打进可执行文件
+cd ../NyxBot-Go
+go build -o NyxBot ./cmd/server
 ```
 
 Windows 本地打包用 `pwsh build.ps1`（校验前端产物 → 注入图标与版本信息 → 编译）。
