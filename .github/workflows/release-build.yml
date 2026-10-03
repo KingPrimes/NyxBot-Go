@@ -53,6 +53,7 @@ jobs:
         with:
           repository: ${{ env.WEBUI_REPOSITORY }}
           path: NyxBot-WebUI
+          persist-credentials: false
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
