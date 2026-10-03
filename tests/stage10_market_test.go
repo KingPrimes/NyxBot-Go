@@ -1015,3 +1015,80 @@ func replyText(params any) string {
 	}
 	return builder.String()
 }
+
+// ayatanOrderJSON 生成阿耶檀识塑像订单（rank 为 null，改带琥珀/靛蓝星数）。
+func ayatanOrderJSON(id string, amberStars, cyanStars int) string {
+	payload := map[string]any{
+		"id":         id,
+		"type":       "sell",
+		"platinum":   20,
+		"quantity":   1,
+		"rank":       nil,
+		"amberStars": amberStars,
+		"cyanStars":  cyanStars,
+		"itemId":     testAyatanItemID,
+		"visible":    true,
+		"createdAt":  "2026-08-07T10:00:00Z",
+		"updatedAt":  "2026-08-07T10:00:00Z",
+		"user": map[string]any{
+			"id":         "u-" + id,
+			"ingameName": "卖家" + id,
+			"status":     "online",
+			"platform":   "pc",
+		},
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
+// testAyatanItemID 测试用阿耶檀识塑像物品 ID。
+const testAyatanItemID = "item-ayatan-anasa"
+
+// TestQueryMarketOrdersAyatanMaxStars 验证阿耶檀识「满星」过滤按琥珀/靛蓝星各自上限比对。
+//
+// 回归背景：本地 orders_items 实测 11 个塑像 maxRank 全为 0，星际上限为 maxAmberStars/
+// maxCyanStars（1~4，且 9/11 两者不相等）。原实现把两条星数都与 maxRank(0) 比较，
+// 使「满星」查询恒为空。
+func TestQueryMarketOrdersAyatanMaxStars(t *testing.T) {
+	setupMarketDB(t)
+	// Anasa：琥珀上限 2、靛蓝上限 2（与 maxRank=0 不同）
+	if err := database.DB.Create(&modelwarframe.OrdersItem{
+		ID: testAyatanItemID, Slug: "ayatan_anasa_sculpture", Name: "ayatan anasa sculpture",
+		MaxRank: 0, MaxAmberStars: 2, MaxCyanStars: 2, BaseEndo: 2000,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	orders := "[" + strings.Join([]string{
+		ayatanOrderJSON("full", 2, 2),
+		ayatanOrderJSON("amber-low", 1, 2),
+		ayatanOrderJSON("cyan-low", 2, 1),
+	}, ",") + "]"
+	api := marketTestServer(t, orders, `{"payload":{"auctions":[]}}`, `{"payload":{}}`)
+
+	all, err := warframe.QueryMarketOrders(api, "ayatan anasa sculpture", false, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.Item == nil {
+		t.Fatal("应命中本地阿耶檀识塑像条目")
+	}
+	if len(all.Orders) != 3 {
+		t.Fatalf("未要求满星时应返回 3 条, 实际 %d (%v)", len(all.Orders), orderIDs(all.Orders))
+	}
+	if all.Item.MaxAmberStars == nil || *all.Item.MaxAmberStars != 2 ||
+		all.Item.MaxCyanStars == nil || *all.Item.MaxCyanStars != 2 {
+		t.Fatalf("绘图 DTO 应带各自星数上限: amber=%v cyan=%v", all.Item.MaxAmberStars, all.Item.MaxCyanStars)
+	}
+
+	maxed, err := warframe.QueryMarketOrders(api, "ayatan anasa sculpture", false, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(maxed.Orders) != 1 || maxed.Orders[0].ID != "full" {
+		t.Fatalf("满星过滤应只保留 full, 实际 %v", orderIDs(maxed.Orders))
+	}
+}
