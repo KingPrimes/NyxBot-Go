@@ -1,0 +1,33 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": {
+      "Major": 1,
+      "Minor": 0,
+      "Patch": 0,
+      "Build": 0
+    },
+    "ProductVersion": {
+      "Major": 1,
+      "Minor": 0,
+      "Patch": 0,
+      "Build": 0
+    }
+  },
+  "StringFileInfo": {
+    "CompanyName": "NyxBot",
+    "FileDescription": "NyxBot Server",
+    "FileVersion": "1.0.0",
+    "InternalName": "NyxBot.exe",
+    "OriginalFilename": "NyxBot.exe",
+    "ProductName": "NyxBot",
+    "ProductVersion": "1.0.0",
+    "LegalCopyright": "Copyright (c) 2026 NyxBot"
+  },
+  "VarFileInfo": {
+    "Translation": {
+      "LangID": "0804",
+      "CharsetID": "04B0"
+    }
+  },
+  "IconPath": "build/icons/windows.ico"
+}

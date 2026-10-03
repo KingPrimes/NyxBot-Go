@@ -251,10 +251,27 @@ jobs:
           mv "dist/linux/amd64/${{ needs.metadata.outputs.executable_name }}-linux-amd64" "dist/linux/amd64/NyxBot"
           mv "dist/linux/arm64/${{ needs.metadata.outputs.executable_name }}-linux-arm64" "dist/linux/arm64/NyxBot"
           chmod +x dist/linux/*/NyxBot
+      - name: Resolve registries
+        id: registries
+        shell: bash
+        env:
+          # secrets 不能用在 job 级 if 里，所以在步骤内判定、经 step output 传递
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          # 未配置 DOCKERHUB_* 时只推 GHCR，避免因缺 secrets 让整个发布变红
+          if [[ -n "$DOCKERHUB_USER" && -n "$DOCKERHUB_PASS" ]]; then
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+            printf 'images<<EOF\nkingprimes/nyxbot-go\nghcr.io/%s/nyxbot-go\nEOF\n' "${{ github.repository_owner }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+            printf 'images<<EOF\nghcr.io/%s/nyxbot-go\nEOF\n' "${{ github.repository_owner }}" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Docker Hub 已跳过::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 未配置，本次只推 GHCR"
+          fi
       - uses: docker/setup-buildx-action@v3
       - name: Login to Docker Hub
         uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.registries.outputs.dockerhub == 'true'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -269,9 +286,7 @@ jobs:
         id: docker_meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            kingprimes/nyxbot-go
-            ghcr.io/${{ github.repository_owner }}/nyxbot-go
+          images: ${{ steps.registries.outputs.images }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}

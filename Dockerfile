@@ -13,8 +13,8 @@ RUN apk add --no-cache ca-certificates tzdata font-noto-cjk \
 WORKDIR /app
 
 # 前端已由 go:embed 打进二进制（见 resources/assets.go），镜像内无需再放 resources 目录
+# config.yaml 也不入镜像：它含 JWT 密钥、属运行期配置，容器首次启动会用默认值在 /app 下生成
 COPY dist/linux/${TARGETARCH}/NyxBot /app/NyxBot
-COPY config.yaml /app/config.yaml
 
 ARG VERSION=dev
 ARG PRODUCT_NAME=NyxBot
