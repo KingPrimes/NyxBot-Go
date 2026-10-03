@@ -12,11 +12,9 @@ RUN apk add --no-cache ca-certificates tzdata font-noto-cjk \
 
 WORKDIR /app
 
+# 前端已由 go:embed 打进二进制（见 resources/assets.go），镜像内无需再放 resources 目录
 COPY dist/linux/${TARGETARCH}/NyxBot /app/NyxBot
-COPY resources /app/resources
 COPY config.yaml /app/config.yaml
-COPY build/icons/icon.png /app/resources/icon.png
-COPY build/icons/icon.svg /app/resources/icon.svg
 
 ARG VERSION=dev
 ARG PRODUCT_NAME=NyxBot

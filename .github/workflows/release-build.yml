@@ -12,6 +12,9 @@ permissions:
 
 env:
   GO_VERSION: "1.25.x"
+  # 前端源码仓库（独立仓库，构建产物不入本仓库）；CI 拉取后 pnpm build，再由 go:embed 打进二进制
+  WEBUI_REPOSITORY: KingPrimes/NyxBot-WebUI
+  NODE_VERSION: "22.x"
 
 jobs:
   metadata:
@@ -41,9 +44,46 @@ jobs:
           echo "description=$(jq -r '.description' "$META")" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+  frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ${{ env.WEBUI_REPOSITORY }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WEBUI_REPOSITORY }}
+          path: NyxBot-WebUI
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: NyxBot-WebUI/pnpm-lock.yaml
+      - name: Build WebUI
+        working-directory: NyxBot-WebUI
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          # WebUI 的 move-index-html 插件会把 resources/static/index.html 移到 resources/templates
+          test -f resources/templates/index.html
+          test -d resources/static/static
+          echo "frontend files: $(find resources -type f | wc -l)"
+      - name: Upload frontend assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-dist
+          path: NyxBot-WebUI/resources
+          if-no-files-found: error
+          retention-days: 1
+
   linux:
     name: Linux ${{ matrix.goarch }}
-    needs: metadata
+    needs: [metadata, frontend]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -53,6 +93,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Download frontend assets
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-dist
+          path: resources
+      - name: Verify frontend assets
+        shell: bash
+        run: |
+          test -f resources/templates/index.html
+          test -d resources/static/static
+          echo "frontend files to embed: $(find resources -type f | wc -l)"
       - name: Build binary
         shell: bash
         run: |
@@ -67,7 +118,7 @@ jobs:
 
   macos:
     name: macOS ${{ matrix.goarch }}
-    needs: metadata
+    needs: [metadata, frontend]
     runs-on: macos-latest
     strategy:
       matrix:
@@ -77,6 +128,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Download frontend assets
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-dist
+          path: resources
+      - name: Verify frontend assets
+        shell: bash
+        run: |
+          test -f resources/templates/index.html
+          test -d resources/static/static
+          echo "frontend files to embed: $(find resources -type f | wc -l)"
       - name: Build binary
         shell: bash
         run: |
@@ -91,13 +153,26 @@ jobs:
 
   windows:
     name: Windows amd64
-    needs: metadata
+    needs: [metadata, frontend]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Download frontend assets
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-dist
+          path: resources
+      - name: Verify frontend assets
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "resources/templates/index.html")) { throw "frontend index.html missing" }
+          if (-not (Test-Path -LiteralPath "resources/static/static")) { throw "frontend assets dir missing" }
+          $files = @(Get-ChildItem -LiteralPath "resources" -Recurse -File)
+          if ($files.Count -lt 2) { throw "frontend assets look empty ($($files.Count) files)" }
+          Write-Host "frontend files to embed: $($files.Count)"
       - name: Install goversioninfo
         shell: pwsh
         run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
