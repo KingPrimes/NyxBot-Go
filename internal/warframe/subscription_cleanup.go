@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -25,17 +26,28 @@ import (
 	modelwarframe "nyxbot-go/internal/model/warframe"
 )
 
-// subscriptionCleanupDelay 退群清理延迟：留给「Bot 被踢后立刻被拉回」的抖动窗口。
+// defaultSubscriptionCleanupDelay 默认退群清理延迟：留给「Bot 被踢后立刻被拉回」的抖动窗口。
 // 真正的旧记录删除在 HandleGroupDecrease 中**立即**完成（进入延迟之前），
 // 这里的延迟仅用于对旧记录快照再做一次幂等兜底清理。
-// 声明为变量以便黑盒测试将其置零，避免测试等待真实延迟。
-var subscriptionCleanupDelay = 5 * time.Second
+const defaultSubscriptionCleanupDelay = 5 * time.Second
+
+// subscriptionCleanupDelayNS 当前退群清理延迟（纳秒）。
+// 用原子变量而非普通变量：worker goroutine 会读取它，测试（SetSubscriptionCleanupDelay）
+// 会在运行期写入，普通变量构成数据竞争。
+var subscriptionCleanupDelayNS atomic.Int64
+
+func init() { subscriptionCleanupDelayNS.Store(int64(defaultSubscriptionCleanupDelay)) }
 
 // subscriptionCleanupJob 一次待执行的退群清理。
+//
+// db 为事件发生时捕获的数据库句柄：延迟阶段不再读全局 database.DB，既避免与「测试运行期
+// 替换全局句柄」构成数据竞争，也保证清理始终作用于事件发生时的那个库。
+//
 // userPKs 是事件发生时对旧用户记录主键做的快照：延迟阶段只按这些主键删除规则，
 // 不按 sub_id/user_id 反查，因此窗口期内由 findOrCreateSubscription/findOrCreateUser
 // 新建的记录不会被延迟任务误删（三张表主键均为 AUTOINCREMENT，主键不复用）。
 type subscriptionCleanupJob struct {
+	db             *gorm.DB
 	subscriptionID uint
 	userPKs        []uint
 	userID         int64
@@ -57,11 +69,12 @@ var (
 // findOrCreateSubscription/findOrCreateUser 也只会新建记录（新主键），
 // 延迟任务按旧快照删除，不会波及新记录。
 func HandleGroupDecrease(groupID, userID, botUID int64) {
-	if database.DB == nil || groupID <= 0 {
+	db := database.DB // 只在此处读一次全局句柄，并随 job 传给延迟阶段
+	if db == nil || groupID <= 0 {
 		return
 	}
 	var subscription modelwarframe.MissionSubscribe
-	err := database.DB.Where("sub_group = ?", groupID).First(&subscription).Error
+	err := db.Where("sub_group = ?", groupID).First(&subscription).Error
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			logging.WarnPack("warframe.subscribe", "query subscription for group %d failed: %v", groupID, err)
@@ -70,6 +83,7 @@ func HandleGroupDecrease(groupID, userID, botUID int64) {
 	}
 
 	job := subscriptionCleanupJob{
+		db:             db,
 		subscriptionID: subscription.ID,
 		userID:         userID,
 		groupID:        groupID,
@@ -108,11 +122,11 @@ func startSubscriptionCleanupWorker() {
 }
 
 // runSubscriptionCleanupWorker 消费清理任务并延迟重放快照清理（幂等）；channel 关闭时退出。
-// 每条任务执行前**重新读取**延迟值，便于测试在运行期调整。
+// 每条任务执行前**重新读取**延迟值，便于测试在运行期调整（原子读，见 subscriptionCleanupDelayNS）。
 func runSubscriptionCleanupWorker(jobs <-chan subscriptionCleanupJob) {
 	for job := range jobs {
 		// 逐条延迟执行，保证同一 worker 内的处理顺序（先到的事件先清）
-		time.Sleep(subscriptionCleanupDelay)
+		time.Sleep(time.Duration(subscriptionCleanupDelayNS.Load()))
 		if err := applySubscriptionCleanup(job); err != nil {
 			logging.ErrorPack("warframe.subscribe", "delayed cleanup for group %d failed: %v", job.groupID, err)
 		}
@@ -124,13 +138,16 @@ func SetSubscriptionCleanupDelay(delay time.Duration) {
 	if delay < 0 {
 		delay = 0
 	}
-	subscriptionCleanupDelay = delay
+	subscriptionCleanupDelayNS.Store(int64(delay))
 }
 
 // snapshotCleanupUsers 快照本次事件要清理的旧用户记录主键：
-// Bot 被踢时为该订阅组全部用户，普通成员退群时仅该成员。
+// Bot 被踢时为该订阅组全部用户，普通成员退群时仅该成员。使用 job.db（事件时的句柄）。
 func snapshotCleanupUsers(job subscriptionCleanupJob) []uint {
-	query := database.DB.Model(&modelwarframe.MissionSubscribeUser{}).Where("sub_id = ?", job.subscriptionID)
+	if job.db == nil {
+		return nil
+	}
+	query := job.db.Model(&modelwarframe.MissionSubscribeUser{}).Where("sub_id = ?", job.subscriptionID)
 	if !job.botKicked {
 		query = query.Where("user_id = ?", job.userID)
 	}
@@ -149,11 +166,12 @@ func snapshotCleanupUsers(job subscriptionCleanupJob) []uint {
 // applySubscriptionCleanup 按快照幂等清理旧记录（延迟前后可重复执行）。
 // 事务内按 规则 → 用户 → 订阅组 顺序删除：任一步失败（含 deleteRulesOfUser）即回滚并返回错误，
 // 只有全部成功才提交。Bot 被踢时删整个订阅组，普通成员退群时仅在该组已无用户时删组。
+// 全程使用 job.db（事件发生时的句柄），不再读全局 database.DB。
 func applySubscriptionCleanup(job subscriptionCleanupJob) error {
-	if database.DB == nil || job.subscriptionID == 0 {
+	if job.db == nil || job.subscriptionID == 0 {
 		return nil
 	}
-	return database.DB.Transaction(func(tx *gorm.DB) error {
+	return job.db.Transaction(func(tx *gorm.DB) error {
 		if err := deleteRulesOfUser(tx, job.userPKs...); err != nil {
 			return fmt.Errorf("delete rules of subscription %d: %w", job.subscriptionID, err)
 		}
