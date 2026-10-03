@@ -81,8 +81,11 @@ func main() {
 	} else {
 		if err := botRuntime.RegisterRoutes(r); err != nil {
 			logging.ErrorPack("main", "OneBot route registration failed: %v", err)
-		} else if err := botRuntime.Start(serverContext); err != nil {
-			logging.ErrorPack("main", "OneBot startup failed: %v", err)
+		} else {
+			botRuntime.SetDataExecutor(importer)
+			if err := botRuntime.Start(serverContext); err != nil {
+				logging.ErrorPack("main", "OneBot startup failed: %v", err)
+			}
 		}
 		defer func() {
 			if err := botRuntime.Close(); err != nil {

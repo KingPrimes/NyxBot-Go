@@ -784,19 +784,19 @@ func (importer *DataImporter) ImportWarframes(_ context.Context) error {
 		return err
 	}
 	var entries []struct {
-		UniqueName      string `json:"uniqueName"`
-		Name            string `json:"name"`
-		ParentName      string `json:"parentName"`
-		Description     string `json:"description"`
-		Health          int    `json:"health"`
-		Shield          int    `json:"shield"`
-		Armor           int    `json:"armor"`
-		Stamina         int    `json:"stamina"`
-		Power           int    `json:"power"`
-		CodexSecret     bool   `json:"codexSecret"`
-		MasteryReq      int    `json:"masteryReq"`
+		UniqueName      string  `json:"uniqueName"`
+		Name            string  `json:"name"`
+		ParentName      string  `json:"parentName"`
+		Description     string  `json:"description"`
+		Health          int     `json:"health"`
+		Shield          int     `json:"shield"`
+		Armor           int     `json:"armor"`
+		Stamina         int     `json:"stamina"`
+		Power           int     `json:"power"`
+		CodexSecret     bool    `json:"codexSecret"`
+		MasteryReq      int     `json:"masteryReq"`
 		SprintSpeed     float64 `json:"sprintSpeed"` // 真实数据含浮点（如 1.1），入库截断对齐 Java
-		ProductCategory string `json:"productCategory"`
+		ProductCategory string  `json:"productCategory"`
 		Abilities       []struct {
 			AbilityUniqueName string `json:"abilityUniqueName"`
 			AbilityName       string `json:"abilityName"`
@@ -964,6 +964,26 @@ func (importer *DataImporter) UpdateRivenItems(_ context.Context) error {
 // UpdateLichSister 更新赤毒/信条武器（对应 POST /data/warframe/lich-sister/update）。
 func (importer *DataImporter) UpdateLichSister(_ context.Context) error {
 	return importer.importLichSisterWeapons()
+}
+
+// UpdateTranslation 组合更新全部翻译数据（对齐 Java UpdateWarframeTar）：
+// 先导状态翻译，再顺序节点/武器/奖励池/电波翻译。
+func (importer *DataImporter) UpdateTranslation(ctx context.Context) error {
+	if err := importer.ImportStateTranslation(ctx); err != nil {
+		return err
+	}
+	steps := []func(context.Context) error{
+		importer.ImportNodes,
+		importer.ImportWeapons,
+		importer.ImportRewardPool,
+		importer.ImportNightWave,
+	}
+	for _, step := range steps {
+		if err := step(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateEphemeras 更新幻纹（对应 POST /data/warframe/ephemeras/update）。

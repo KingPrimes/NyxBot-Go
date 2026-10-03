@@ -89,6 +89,13 @@ func (runtime *Runtime) RegisterRoutes(routes gin.IRoutes) (err error) {
 	return nil
 }
 
+// SetDataExecutor 注入管理类数据更新执行器到指令注册器（Start 前调用）。
+func (runtime *Runtime) SetDataExecutor(executor DataUpdateExecutor) {
+	if runtime != nil && runtime.commands != nil {
+		runtime.commands.SetDataExecutor(executor)
+	}
+}
+
 // Start 注册指令并异步启动 ZeroBot 与在线目录同步。重复调用不会重复启动。
 func (runtime *Runtime) Start(parent context.Context) error {
 	if runtime == nil {

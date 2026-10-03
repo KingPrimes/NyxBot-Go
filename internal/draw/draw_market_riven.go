@@ -55,68 +55,70 @@ var rivenElementOrder = []drawplugin.Element{
 }
 
 // MarketRiven 市场紫卡拍卖数据（对齐 Java model.market.MarketRiven 原始字段）。
+// 字段 JSON 标签与 warframe.market /v1/auctions/search 响应一致，可直接反序列化。
 type MarketRiven struct {
-	ItemName string              // 物品名称
-	Payload  *MarketRivenPayload // 数据负载
+	ItemName string              `json:"item_name"` // 物品名称
+	Payload  *MarketRivenPayload `json:"payload"`   // 数据负载
 }
 
 // MarketRivenPayload 紫卡拍卖负载（对齐 Java MarketRiven.Payload 嵌套类展开）。
 type MarketRivenPayload struct {
-	Auctions []*MarketRivenAuction // 拍卖列表
+	Auctions []*MarketRivenAuction `json:"auctions"` // 拍卖列表
 }
 
 // MarketRivenAuction 单条紫卡拍卖（对齐 Java MarketRiven.Auctions 嵌套类展开）。
 type MarketRivenAuction struct {
-	BuyoutPrice       *int              // 买断价格
-	Note              string            // 备注
-	Visible           *bool             // 是否可见
-	Item              *MarketRivenItem  // 物品
-	StartingPrice     *int              // 起拍价
-	MinimalReputation *int              // 声望
-	Owner             *MarketRivenOwner // 卖家/买家
-	Platform          string            // 平台
-	Closed            *bool             // 顶点是否关闭
-	TopBid            *int              // 最高出价
-	Winner            any               // 获胜者
-	IsMarkedFor       any               // 标记对象
-	MarkedOperationAt any               // 标记操作时间
-	Created           time.Time         // 创建时间
-	Updated           time.Time         // 修改时间
-	NoteRaw           string            // 原始备注
-	IsDirectSell      *bool             // 是否买断
-	ID                string            // 订单ID
-	Private           *bool             // 是否是私人
+	BuyoutPrice       *int              `json:"buyout_price"`        // 买断价格
+	Note              string            `json:"note"`                // 备注
+	Visible           *bool             `json:"visible"`             // 是否可见
+	Item              *MarketRivenItem  `json:"item"`                // 物品
+	StartingPrice     *int              `json:"starting_price"`      // 起拍价
+	MinimalReputation *int              `json:"minimal_reputation"`  // 声望
+	Owner             *MarketRivenOwner `json:"owner"`               // 卖家/买家
+	Platform          string            `json:"platform"`            // 平台
+	Closed            *bool             `json:"closed"`              // 顶点是否关闭
+	TopBid            *int              `json:"top_bid"`             // 最高出价
+	Winner            any               `json:"winner"`              // 获胜者
+	IsMarkedFor       any               `json:"is_marked_for"`       // 标记对象
+	MarkedOperationAt any               `json:"marked_operation_at"` // 标记操作时间
+	Created           time.Time         `json:"created"`             // 创建时间
+	Updated           time.Time         `json:"updated"`             // 修改时间
+	NoteRaw           string            `json:"note_raw"`            // 原始备注
+	IsDirectSell      *bool             `json:"is_direct_sell"`      // 是否买断
+	ID                string            `json:"id"`                  // 订单ID
+	Private           *bool             `json:"private"`             // 是否是私人
 }
 
 // MarketRivenItem 紫卡物品（对齐 Java MarketRiven.Item 嵌套类展开）。
 type MarketRivenItem struct {
-	Type          string                  // 物品类型
-	ModRank       *int                    // Mod等级
-	WeaponURLName string                  // 武器名称
-	Attributes    []*MarketRivenAttribute // 紫卡词条
-	Name          string                  // 紫卡名称
-	ReRolls       *int                    // 紫卡循环次数
-	Polarity      drawplugin.Polarity     // 紫卡极性
-	MasteryLevel  *int                    // 段位限制
+	Type          string                  `json:"type"`            // 物品类型
+	ModRank       *int                    `json:"mod_rank"`        // Mod等级
+	WeaponURLName string                  `json:"weapon_url_name"` // 武器名称
+	Attributes    []*MarketRivenAttribute `json:"attributes"`      // 紫卡词条
+	Name          string                  `json:"name"`            // 紫卡名称
+	ReRolls       *int                    `json:"re_rolls"`        // 紫卡循环次数
+	Polarity      drawplugin.Polarity     `json:"polarity"`        // 紫卡极性
+	MasteryLevel  *int                    `json:"mastery_level"`   // 段位限制
 }
 
 // MarketRivenAttribute 紫卡词条（对齐 Java MarketRiven.Attributes 嵌套类展开）。
+// URLName 在解析后会被回译为中文效果文本。
 type MarketRivenAttribute struct {
-	Value    *float64 // 词条数值
-	Positive *bool    // 是否是正向
-	URLName  string   // 词条名称
+	Value    *float64 `json:"value"`    // 词条数值
+	Positive *bool    `json:"positive"` // 是否是正向
+	URLName  string   `json:"url_name"` // 词条名称
 }
 
 // MarketRivenOwner 拍卖卖家信息（对齐 Java model.market.Owner 原始字段）。
 type MarketRivenOwner struct {
-	Reputation *int      // 声望
-	Locale     string    // 区服
-	Avatar     string    // 玩家头像
-	LastSeen   time.Time // 上次登录时间
-	IngameName string    // 游戏内名称
-	Status     string    // 用户状态
-	ID         string    // 用户ID
-	Region     string    // 所使用的语言
+	Reputation *int      `json:"reputation"`  // 声望
+	Locale     string    `json:"locale"`      // 区服
+	Avatar     string    `json:"avatar"`      // 玩家头像
+	LastSeen   time.Time `json:"last_seen"`   // 上次登录时间
+	IngameName string    `json:"ingame_name"` // 游戏内名称
+	Status     string    `json:"status"`      // 用户状态
+	ID         string    `json:"id"`          // 用户ID
+	Region     string    `json:"region"`      // 所使用的语言
 }
 
 // formatRivenDouble 格式化紫卡词条数值（对齐 Java String.valueOf(double)：

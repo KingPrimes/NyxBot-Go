@@ -3,12 +3,14 @@
 package tests
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,7 +308,7 @@ func TestSubscribeEnumsAndPagination(t *testing.T) {
 	// 枚举
 	recorder := doRequest(t, r, http.MethodGet, "/data/warframe/subscribe/sub", token, "")
 	var envelope struct {
-		Code int             `json:"code"`
+		Code int              `json:"code"`
 		Data []enumOptionTest `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
@@ -406,6 +408,50 @@ func TestUpdateTriggersAsyncTask(t *testing.T) {
 	}
 }
 
+// sseRecorder 并发安全的 http.ResponseWriter，用于 SSE 流式接口测试。
+//
+// 不能直接用 httptest.ResponseRecorder：它的 Body 是 *bytes.Buffer（非并发安全），
+// 而 SSE 处理器在独立 goroutine 里持续写入、测试在 waitFor 里轮询读取，
+// 会构成真实的数据竞争（-race 可复现）。这里用互斥锁串行化读写。
+type sseRecorder struct {
+	mu     sync.Mutex
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+// newSSERecorder 创建并发安全的响应记录器。
+func newSSERecorder() *sseRecorder {
+	return &sseRecorder{header: make(http.Header), status: http.StatusOK}
+}
+
+// Header 返回响应头。
+func (rec *sseRecorder) Header() http.Header { return rec.header }
+
+// Write 写入响应体（加锁）。
+func (rec *sseRecorder) Write(p []byte) (int, error) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.body.Write(p)
+}
+
+// WriteHeader 记录状态码（加锁）。
+func (rec *sseRecorder) WriteHeader(status int) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	rec.status = status
+}
+
+// Flush 实现 http.Flusher（SSE 需要），无缓冲故为空实现。
+func (rec *sseRecorder) Flush() {}
+
+// String 返回已写入内容（加锁，供测试轮询）。
+func (rec *sseRecorder) String() string {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.body.String()
+}
+
 // TestDataRefreshSSE 验证 /sse/data-refresh 可建立连接并收到 connected 事件。
 func TestDataRefreshSSE(t *testing.T) {
 	r, _ := setupWarframeDataRouter(t)
@@ -413,14 +459,14 @@ func TestDataRefreshSSE(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet, "/sse/data-refresh", nil).WithContext(ctx)
-	recorder := httptest.NewRecorder()
+	recorder := newSSERecorder()
 	done := make(chan struct{})
 	go func() {
 		r.ServeHTTP(recorder, req)
 		close(done)
 	}()
 	// SSE 连接会持续，验证首帧后取消连接
-	waitFor(t, func() bool { return strings.Contains(recorder.Body.String(), "sessionId") }, "sse should emit connected event")
+	waitFor(t, func() bool { return strings.Contains(recorder.String(), "sessionId") }, "sse should emit connected event")
 	cancel()
 	select {
 	case <-done:
