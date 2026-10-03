@@ -16,6 +16,12 @@ import (
 	modelwarframe "nyxbot-go/internal/model/warframe"
 )
 
+// fissureTierMin/fissureTierMax 裂隙等级取值范围（对齐 tierName 的 古纪1 … 安魂5）。
+const (
+	fissureTierMin = 1
+	fissureTierMax = 5
+)
+
 // subscribeOrder 对齐 Java SubscribeType 声明顺序（下标即 ordinal/code）。
 var subscribeOrder = []nyxbot.SubscribeType{
 	nyxbot.SubAlerts, nyxbot.SubArbitration, nyxbot.SubCetusCycle, nyxbot.SubDailyDeals,
@@ -263,20 +269,20 @@ func ParseUnsubscribeParams(code int, parts []string) (nyxbot.SubscribeType, *ny
 	return subType, mission, tier, reward, ok
 }
 
-// ParseSubscribeCommand 将已去「订阅」前缀、去空格的内容（如 "9-2-4"）解析到命令。
+// ParseSubscribeCommand 将已去「订阅」前缀的内容（如 "9-2-4"）解析到命令。
+// 严格校验：保留空段（不做压缩或忽略），任何空段（如 "9--4"、"9-"）一律判为非法；
+// 按订阅类型限制参数个数并拒绝多余段；裂隙等级只接受 1~5。
+// 任何不合法输入都返回 false，不生成规则。
 func ParseSubscribeCommand(command *SubscribeCommand, raw string) bool {
 	if command == nil {
 		return false
 	}
-	parts := make([]string, 0, 3)
-	for _, part := range strings.Split(raw, "-") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			parts = append(parts, part)
+	parts := strings.Split(raw, "-")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+		if parts[i] == "" {
+			return false
 		}
-	}
-	if len(parts) == 0 {
-		return false
 	}
 	code, err := strconv.Atoi(parts[0])
 	if err != nil {
@@ -289,7 +295,11 @@ func ParseSubscribeCommand(command *SubscribeCommand, raw string) bool {
 	command.SubType = subType
 	switch subType {
 	case nyxbot.SubInvasions:
-		if len(parts) > 1 {
+		// 最多 1 个参数：入侵奖励编号
+		if len(parts) > 2 {
+			return false
+		}
+		if len(parts) == 2 {
 			r, ok := ParseInvasionReward(atoiOrZero(parts[1]))
 			if !ok {
 				return false
@@ -297,6 +307,10 @@ func ParseSubscribeCommand(command *SubscribeCommand, raw string) bool {
 			command.Reward = &r
 		}
 	case nyxbot.SubFissures:
+		// 最多 2 个参数：任务类型编号、裂隙等级
+		if len(parts) > 3 {
+			return false
+		}
 		if len(parts) > 1 {
 			m, ok := ParseMissionType(atoiOrZero(parts[1]))
 			if !ok {
@@ -306,18 +320,27 @@ func ParseSubscribeCommand(command *SubscribeCommand, raw string) bool {
 		}
 		if len(parts) > 2 {
 			t, err := strconv.Atoi(parts[2])
-			if err != nil {
+			if err != nil || t < fissureTierMin || t > fissureTierMax {
 				return false
 			}
 			command.Tier = &t
 		}
 	case nyxbot.SubArbitration:
-		if len(parts) > 1 {
+		// 最多 1 个参数：任务类型编号
+		if len(parts) > 2 {
+			return false
+		}
+		if len(parts) == 2 {
 			m, ok := ParseMissionType(atoiOrZero(parts[1]))
 			if !ok {
 				return false
 			}
 			command.Mission = &m
+		}
+	default:
+		// 无参数订阅类型：不接受任何多余段
+		if len(parts) > 1 {
+			return false
 		}
 	}
 	return true
@@ -566,9 +589,14 @@ func cleanupEmptyUser(subuID uint, subscriptionID uint) {
 		return
 	}
 	// 用户已无规则：连同其残留规则一并清理，避免产生孤儿规则
-	deleteRulesOfUser(subuID)
+	if err := deleteRulesOfUser(database.DB, subuID); err != nil {
+		logging.ErrorPack("warframe.subscribe", "delete rules of user %d failed: %v", subuID, err)
+		return
+	}
 	database.DB.Delete(&modelwarframe.MissionSubscribeUser{}, subuID)
-	removeSubscriptionIfEmpty(subscriptionID)
+	if err := removeSubscriptionIfEmpty(database.DB, subscriptionID); err != nil {
+		logging.ErrorPack("warframe.subscribe", "remove empty subscription %d failed: %v", subscriptionID, err)
+	}
 }
 
 // missionToStr returns the mission type value, or an empty string when it is unspecified.

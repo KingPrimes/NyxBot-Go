@@ -216,7 +216,10 @@ func translateReward(r *wsReward) *draw.Reward {
 	out := &draw.Reward{
 		Credits: r.Credits,
 		Xp:      r.Xp,
-		Items:   r.Items,
+	}
+	// 物品名逐个翻译，避免把 /Lotus/... 内部标识直接带进绘图 DTO
+	for _, item := range r.Items {
+		out.Items = append(out.Items, TranslateStateName(item))
 	}
 	for i := range r.CountedItems {
 		count := r.CountedItems[i].ItemCount
