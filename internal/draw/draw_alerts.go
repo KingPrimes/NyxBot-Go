@@ -159,19 +159,34 @@ func drawAlertCard(canvas *Canvas, alert *Alert, cardX, cardY, cardW int) {
 		}
 	}
 
-	// 奖励文字（超宽截断加 "..")
+	// 奖励文字（超宽截断加 ".."；按 rune 截断，避免把 UTF-8 字符切成半个）
 	rewardText := buildRewardText(alert)
 	if rewardText != "" {
 		canvas.SetColor(accentGoldColor).SetFontSize(24)
 		maxRewardW := innerX + innerW - cursorX - 6
-		for canvas.StringWidth(rewardText) > float64(maxRewardW) && len(rewardText) > 3 {
-			rewardText = rewardText[:len(rewardText)-1]
-		}
-		if canvas.StringWidth(rewardText) > float64(maxRewardW) {
-			rewardText += ".."
-		}
+		rewardText = truncateToWidth(canvas, rewardText, float64(maxRewardW))
 		canvas.AddText(rewardText, float64(cursorX), float64(badgeY+1))
 	}
+}
+
+// truncateToWidth 把文本按 rune 截断到给定像素宽度内，为 ".." 后缀预留宽度，
+// 且仅在确实发生截断时追加后缀（对齐 Java DefaultDrawAlertsImage 的奖励文字处理）。
+// 文本未超宽时原样返回，保证不会出现「已截断但无后缀」或后缀导致再次溢出。
+func truncateToWidth(canvas *Canvas, text string, maxWidth float64) string {
+	if canvas.StringWidth(text) <= maxWidth {
+		return text
+	}
+	runes := []rune(text)
+	truncated := false
+	// 循环中以「候选文本 + ..」测宽，确保加上后缀后仍不超宽
+	for len(runes) > 3 && canvas.StringWidth(string(runes)+"..") > maxWidth {
+		runes = runes[:len(runes)-1]
+		truncated = true
+	}
+	if !truncated {
+		return text
+	}
+	return string(runes) + ".."
 }
 
 // buildRewardText 拼接奖励文本：星币 + 前 5 个物品（对齐 Java buildRewardText）。

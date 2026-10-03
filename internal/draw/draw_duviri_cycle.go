@@ -126,8 +126,9 @@ func drawDuviriChoiceCard(canvas *Canvas, title string, items []string, cardX, c
 	itemY := cardY + 70
 	for i := 0; i < displayed; i++ {
 		item := items[i]
-		if len(item) > 22 {
-			item = item[:20] + ".."
+		// 按 rune 截断（对齐 Java substring(0, 20)），避免切断 UTF-8 多字节字符
+		if runes := []rune(item); len(runes) > 22 {
+			item = string(runes[:20]) + ".."
 		}
 		canvas.SetColor(textColor).SetFontSize(20)
 		canvas.AddText("• "+item, float64(cardX+25), float64(itemY+8))

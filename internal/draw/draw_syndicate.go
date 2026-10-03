@@ -74,7 +74,9 @@ func drawSyndicateNodesView(sm *SyndicateMission) []byte {
 		return nil
 	}
 	nodeHeight := len(nodes) * 50
-	totalHeight := imageMarginT + imageTitleH + nodeHeight + imageFooterH
+	// 节点基线为 imageMarginT+imageTitleH+50+(n-1)*50，页脚基线为 totalHeight-imageFooterH；
+	// 额外 50 的底部间距用于把页脚推到最后一个节点下方，否则两者基线完全重合、页脚压住末行节点
+	totalHeight := imageMarginT + imageTitleH + nodeHeight + 50 + imageFooterH
 
 	canvas := NewCanvas(imageWidth, totalHeight)
 	canvas.SetColor(pageBackgroundColor).FillRect(0, 0, float64(imageWidth), float64(totalHeight))
@@ -119,7 +121,6 @@ func drawSyndicateJobsView(sm *SyndicateMission) []byte {
 		return nil
 	}
 	n := len(jobs)
-	isOdd := n%cols != 0
 
 	szW, szHBox := scaleByPct(float64(imageWidth), float64(imageWidth), standardRatio)
 	cardsContentW := imageWidth - contentX*2
@@ -151,16 +152,14 @@ func drawSyndicateJobsView(sm *SyndicateMission) []byte {
 		}
 	}
 
-	var standingY int
-	if isOdd {
-		standingY = maxI(colEndY[0], colEndY[1])
-	} else {
-		maxEnd := startY
-		for c := range colEndY {
-			maxEnd = maxI(maxEnd, colEndY[c])
-		}
-		standingY = maxEnd + 10
+	// 看板娘统一放在所有卡片下方：取全部列（含第三列）的最大底部再加固定间距。
+	// 卡片高度随奖励条数/描述行数变化（250~1000+），列数少不等于列更短，
+	// 只比前两列会让看板娘压住第三列的卡片。
+	maxEnd := startY
+	for c := range colEndY {
+		maxEnd = maxI(maxEnd, colEndY[c])
 	}
+	standingY := maxEnd + 10
 	standingX := imageWidth - szW
 	totalHeight := standingY + szHBox
 
