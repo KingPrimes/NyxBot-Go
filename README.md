@@ -47,7 +47,7 @@ go vet ./...                        # 静态检查
 Windows 带图标与版本信息的本地构建（需先 `go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest`）：
 
 ```powershell
-pwsh build.ps1                      # 产出 NyxBot.exe
+pwsh build.ps1                      # 校验前端产物 → 注入图标与版本信息 → 产出 NyxBot.exe
 ```
 
 ## 与前端对接
@@ -66,18 +66,40 @@ pwsh build.ps1                      # 产出 NyxBot.exe
 
 响应格式恒为 `{ code, msg, data }`，成功 `code=200`，未认证 `401`，分页数据为 `{ total, size, current, records }`。
 
-## 托管前端静态资源
+## 托管前端（编译期内嵌）
 
-前端构建产物输出到其自身的 `resources/static`，需要拷贝到本项目：
+前端源码不在本仓库（独立仓库 <https://github.com/KingPrimes/NyxBot-WebUI>），构建产物也不入库
+（`resources/static` 被 `.gitignore` 排除）。产物在**编译期**由 `go:embed`（`resources/assets.go`）
+打进可执行文件，运行期不读磁盘。
+
+打包前先构建前端并把它放进本仓库的 `resources/`。下面的命令**起点是 NyxBot-Go 仓库根目录**，
+且假定 `NyxBot-WebUI` 与它同级：
 
 ```bash
-# 在 D:\Demos\NyxBot-WebUI 下
+# 1. 构建前端（产物落在 ../NyxBot-WebUI/resources；已经 clone 过就跳过 git clone）
+cd ..
+git clone https://github.com/KingPrimes/NyxBot-WebUI.git
+cd NyxBot-WebUI
+pnpm install
 pnpm build
+
+# 2. 把产物拷进后端仓库的 resources/（static 与 templates 都要，SPA 入口 index.html 在 templates 里）
+#    源写成 "目录/." 表示拷贝目录内容，这样目标目录已存在时不会被多套一层
+cp -r resources/static/.    ../NyxBot-Go/resources/static/
+cp -r resources/templates/. ../NyxBot-Go/resources/templates/
+
+# 3. 回到后端仓库再编译：go:embed 会把 resources/ 打进可执行文件
+cd ../NyxBot-Go
+go build -o NyxBot ./cmd/server
 ```
 
-```text
-D:\Demos\NyxBot-WebUI\resources\static  ->  D:\Demos\NyxBot-Go\resources\static
-```
+内嵌后的行为：
+
+- 可执行文件自带完整前端，单独拷到任意目录、以任意工作目录启动都能打开页面，
+  运行目录**不需要**再放 `resources`。
+- 前端更新必须**重新编译**（内嵌内容取自编译时的 `resources/`）。
+- CI（`.github/workflows/release-build.yml`）的 `frontend` job 会自动 clone WebUI 仓库并
+  `pnpm build`，把产物作为 artifact 下发给各平台构建 job，再编译进二进制。
 
 之后访问 `http://localhost:8080` 即可（SPA 兜底：未命中的路由返回 `index.html`）。
 
@@ -114,7 +136,7 @@ internal/
   response/                   # 统一 {code,msg,data} 封装 + PageData
   server/                     # Gin 路由、CORS/Recovery/Logger、SSE 日志、/api/logs/**
   system/                     # /config/loading 读写、/log/** 查询
-  web/                        # Vue dist 托管 + SPA 兜底
+  web/                        # 内嵌 Vue 产物托管 + SPA 兜底（资源全部来自 go:embed，运行期不读磁盘）
   auth/                       # /auth/* 双令牌、黑名单、IP 登录限频
   bot/                        # 在线 Bot 快照目录 + /config/bot/**（管理员、黑白名单）
   onebot/                     # OneBot 连接层 + 指令注册/权限/日志 + 各指令 handler
@@ -126,7 +148,8 @@ internal/
   warframe/cycle/             # 各平原周期计算
 tests/                        # 黑盒测试（被测包内不放 *_test.go）
 build/                        # app.json 元数据、图标、平台打包资源
-resources/static/             # 前端构建产物（不入库，保留 .gitkeep）
+resources/assets.go           # go:embed 内嵌 resources/static + resources/templates（前端随二进制分发）
+resources/static/             # 前端构建产物（不入库，保留 .gitkeep；SPA 入口 index.html 在 resources/templates/）
 ```
 
 ## 运行期生成物
@@ -137,7 +160,7 @@ resources/static/             # 前端构建产物（不入库，保留 .gitkeep
 - `admin-credentials.txt`：首启生成的随机管理员账号。
 - `data/`：SQLite 库、`data/logs/`、WorldState 快照 `data/status`、仲裁缓存 `data/arbitration`。
 - `temp/`：绘图测试输出的 PNG。
-- `resources/static/`：前端构建产物。
+- `resources/static/`、`resources/templates/`：前端构建产物（编译期由 `go:embed` 打进二进制）。
 - `cmd/server/resource.syso`：`build.ps1` / CI 生成。
 
 ## 发布
@@ -145,4 +168,13 @@ resources/static/             # 前端构建产物（不入库，保留 .gitkeep
 推送 `v*` tag（或手动触发 `workflow_dispatch`）运行 `.github/workflows/release-build.yml`，
 构建 linux/macOS/Windows 三平台二进制（版本号取自 tag，缺省回退 `build/metadata/app.json`），
 并推送多架构 Docker 镜像到 `kingprimes/nyxbot-go`（Docker Hub）与 `ghcr.io/<owner>/nyxbot-go`。
-Docker 镜像直接复用 CI 构建的 linux 产物，不在镜像内重复编译。
+该工作流先由 `frontend` job 拉取 `KingPrimes/NyxBot-WebUI` 执行 `pnpm build`，把产物下发给各平台后再编译
+（前端因此内嵌在二进制里）；Docker 镜像直接复用 CI 构建的 linux 产物，不在镜像内重复编译，也无需再拷贝 `resources`。
+
+前端版本**默认取该仓库默认分支的最新提交**。需要固定（例如前端改了不兼容的接口、或想让某个发布可复现）时二选一：
+
+- 手动触发时填 `webui_ref`：分支 / 标签 / 提交 SHA；
+- 在仓库 `Settings → Secrets and variables → Actions → Variables` 建 `WEBUI_REF`：tag 触发的发布同样生效，适合长期钉住某个前端版本。
+
+优先级为 `webui_ref` > `WEBUI_REF` > 默认分支；构建日志会打印实际用到的前端 commit
+（`frontend commit : <sha>`），便于回溯某个二进制里内嵌的是哪版前端。
