@@ -817,16 +817,19 @@ func (importer *DataImporter) ImportWarframes(_ context.Context) error {
 			Abilities:       abilities,
 		})
 	}
-	// 技能子表完全由导出文件派生：先校正主键结构并清空，再整体写入
-	// （对齐 Java @OneToMany(orphanRemoval = true)，避免旧行残留与旧单列主键结构阻止写入）。
+	// 技能子表完全由导出文件派生：先校正主键结构（DDL 独立于事务），再在同一事务里清空 + 整体写入
+	// （对齐 Java @OneToMany(orphanRemoval = true)，避免旧行残留与旧单列主键结构阻止写入；
+	// 写入失败时回滚删除，避免技能数据被清空后无法恢复）。
 	if err := importer.ensureAbilitiesSchema(); err != nil {
 		return err
 	}
-	if err := importer.db.Session(&gorm.Session{AllowGlobalUpdate: true}).
-		Delete(&modelwarframe.WarframesAbility{}).Error; err != nil {
-		return fmt.Errorf("clear warframe abilities: %w", err)
-	}
-	return batchSave(importer.db, records, true)
+	return importer.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).
+			Delete(&modelwarframe.WarframesAbility{}).Error; err != nil {
+			return fmt.Errorf("clear warframe abilities: %w", err)
+		}
+		return batchSave(tx, records, true)
+	})
 }
 
 // ensureAbilitiesSchema 校验 abilities 表的主键结构：
@@ -836,8 +839,10 @@ func (importer *DataImporter) ensureAbilitiesSchema() error {
 	var primaryKeys int64
 	if err := importer.db.Raw("SELECT COUNT(*) FROM pragma_table_info('abilities') WHERE pk > 0").
 		Scan(&primaryKeys).Error; err != nil {
-		return nil // 表尚未创建时交由 AutoMigrate 处理
+		return fmt.Errorf("inspect abilities primary key: %w", err)
 	}
+	// primaryKeys == 0 覆盖两种情况：表尚未创建（pragma_table_info 对不存在的表返回 0 行而非报错）
+	// 与旧的单列主键结构——两者都按新结构重建，DROP 对不存在的表是空操作。
 	if primaryKeys >= 2 {
 		return nil
 	}
@@ -947,6 +952,7 @@ func TranslateRelicRewardNames(relics []modelwarframe.Relics) []string {
 // （对齐 Java RelicsImportUtil.importRelicsData：解析 → 过滤机密 → 按 name 去重 → 翻译奖励名 → 落库）。
 // 落库前清空 relic_rewards：子表完全由该导出文件派生，对齐 Java @OneToMany(orphanRemoval = true) 语义，
 // 同时清掉旧主键方案（直接用奖励物品名当 id）留下的脏数据。
+// 清空与写入放在同一事务：写入失败时回滚删除，避免奖励数据被清空后无法恢复。
 func (importer *DataImporter) ImportRelics(_ context.Context) error {
 	raw, err := importer.exporter.ReadExportFile("ExportRelicArcane")
 	if err != nil || len(raw) == 0 {
@@ -960,11 +966,13 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 		return fmt.Errorf("no relic records in ExportRelicArcane")
 	}
 	untranslated := TranslateRelicRewardNames(records)
-	if err := importer.db.Session(&gorm.Session{AllowGlobalUpdate: true}).
-		Delete(&modelwarframe.RelicRewards{}).Error; err != nil {
-		return fmt.Errorf("clear relic rewards: %w", err)
-	}
-	if err := batchSave(importer.db, records, true); err != nil {
+	if err := importer.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).
+			Delete(&modelwarframe.RelicRewards{}).Error; err != nil {
+			return fmt.Errorf("clear relic rewards: %w", err)
+		}
+		return batchSave(tx, records, true)
+	}); err != nil {
 		return err
 	}
 	rewardCount := 0
