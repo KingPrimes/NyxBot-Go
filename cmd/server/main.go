@@ -49,6 +49,7 @@ func main() {
 		MaxAgeDays:     cfg.Log.MaxAgeDays,
 		HistorySize:    cfg.Log.HistorySize,
 		ConsoleEnabled: cfg.Log.Console,
+		Level:          cfg.Log.Level,
 	})
 	database.Init(cfg.Database.Path, cfg.Log.Startup)
 

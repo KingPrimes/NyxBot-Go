@@ -9,12 +9,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"nyxbot-go/internal/config"
+	"nyxbot-go/internal/logging"
 )
 
 // neutralizeConfigEnv 清空会影响配置加载的环境变量，保证测试结果与运行环境无关。
 func neutralizeConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"APP_PORT", "GIN_MODE", "APP_REQUEST_LOG", "DB_PATH", "APP_STARTUP_LOG", "APP_LOG_CONSOLE", "JWT_SECRET"} {
+	for _, key := range []string{"APP_PORT", "GIN_MODE", "APP_REQUEST_LOG", "DB_PATH", "APP_STARTUP_LOG", "APP_LOG_CONSOLE", "APP_LOG_LEVEL", "JWT_SECRET"} {
 		t.Setenv(key, "")
 	}
 }
@@ -39,6 +40,7 @@ func TestLoadFromGeneratesCommentedDefault(t *testing.T) {
 		"# 监听端口",
 		"# SQLite 数据库配置",
 		"# OneBot 连接配置",
+		"# 写入日志文件的最低等级：TRACE / DEBUG / INFO / WARN / ERROR / PANIC（控制台输出全部等级）",
 		"# JWT 签名密钥（首次启动时随机生成，请勿泄露）",
 	} {
 		if !strings.Contains(text, want) {
@@ -47,6 +49,9 @@ func TestLoadFromGeneratesCommentedDefault(t *testing.T) {
 	}
 	if loaded.Server.Port != "8080" {
 		t.Errorf("端口默认值异常: %q", loaded.Server.Port)
+	}
+	if loaded.Log.Level != "INFO" {
+		t.Errorf("日志文件等级默认值应为 INFO，实际: %q", loaded.Log.Level)
 	}
 
 	// 注释不影响解析：写出的内容应能无损读回加载结果
@@ -102,6 +107,49 @@ func TestLoadFromEmptyJwtSecretFallback(t *testing.T) {
 	}
 	if string(data) != string(original) {
 		t.Error("兜底逻辑不应改写用户已有的配置文件")
+	}
+}
+
+// TestLoadFromEnvLogLevelOverride 验证环境变量 APP_LOG_LEVEL 覆盖日志文件等级，
+// 且配置里的等级可被日志系统解析（大小写不敏感）。
+func TestLoadFromEnvLogLevelOverride(t *testing.T) {
+	neutralizeConfigEnv(t)
+	t.Setenv("APP_LOG_LEVEL", "debug")
+
+	cfg := config.LoadFrom(filepath.Join(t.TempDir(), "config.yaml"))
+	if cfg.Log.Level != "debug" {
+		t.Fatalf("APP_LOG_LEVEL 未生效: %q", cfg.Log.Level)
+	}
+	if level, ok := logging.ParseLevel(cfg.Log.Level); !ok || level != logging.LevelDebug {
+		t.Fatalf("配置的日志等级无法解析: %q -> %v (ok=%v)", cfg.Log.Level, level, ok)
+	}
+}
+
+// TestLoadFromInvalidLogLevelWarns 验证非法的 log.level 会回退到 INFO 并打印告警，
+// 避免用户把等级写错后无从察觉。
+func TestLoadFromInvalidLogLevelWarns(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("log:\n  level: verbose\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadFrom(path)
+	if cfg.Log.Level != "verbose" {
+		t.Fatalf("配置原值应保留: %q", cfg.Log.Level)
+	}
+	if _, ok := logging.ParseLevel(cfg.Log.Level); ok {
+		t.Fatal("verbose 不应被解析为合法等级")
+	}
+
+	warned := false
+	for _, entry := range logging.Recent(logging.LevelInfo) {
+		if entry.Level == logging.LevelWarn && strings.Contains(entry.Message, "log.level") && strings.Contains(entry.Message, "verbose") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Error("非法 log.level 未产生告警日志")
 	}
 }
 
