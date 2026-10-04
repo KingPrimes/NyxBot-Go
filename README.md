@@ -179,3 +179,31 @@ resources/static/             # 前端构建产物（不入库，保留 .gitkeep
 
 优先级为 `webui_ref` > `WEBUI_REF` > 默认分支；构建日志会打印实际用到的前端 commit
 （`frontend commit : <sha>`），便于回溯某个二进制里内嵌的是哪版前端。
+
+### GitHub Release（草稿）
+
+tag 触发时另有一个 `release` job（等齐三平台产物后执行，`if: github.ref_type == 'tag'`）用
+`softprops/action-gh-release` 建 **草稿** Release——与 Java 端一致：先建草稿，人工审核后再点发布
+（`draft: true` + `make_latest: true`）。附件为 5 个平台二进制 + `SHA256SUMS.txt`；工作流级权限仍是
+`contents: read`，只有这个 job 单独申请 `contents: write`。
+
+发布说明由 `.github/scripts/generate-release-notes.sh` 生成，包含：
+
+- **发布信息**：版本、提交、**本次二进制内嵌的前端 commit**（来自 `frontend` job 的 output）、构建时间、Docker 标签；
+- **本次变更明细**：按约定式提交类型（feat/fix/refactor/docs/test/ci/chore...）分组的逐条改动，每条带 PR 与 commit 链接，并给出变更规模；
+- **参与贡献**：贡献者列表（GitHub 登录名 + 提交数，同一人的多个邮箱自动合并）与首次参与者，机器人单独列出；
+- **下载与校验**：各产物大小与 SHA256，以及 `sha256sum -c` 用法；
+- 与上一版本的 compare 链接。末尾再由 GitHub 追加自动生成的 What's Changed / New Contributors。
+
+本地预览（不推送、不建 Release）：
+
+```bash
+GITHUB_REF_NAME=v1.2.3 GITHUB_REPOSITORY=KingPrimes/NyxBot-Go \
+  bash .github/scripts/generate-release-notes.sh > release-notes.md
+```
+
+需要在自动明细之外补一段“发布重点”时，加 `build/release-notes/<tag>.md`（例如
+`build/release-notes/v1.2.3.md`），内容会原样插进发布说明。
+
+`workflow_dispatch` 跑在分支上**不会**发版（只出 artifact）；要手动发版，就在触发时把
+“Use workflow from” 选成目标 tag。首次发布（仓库尚无 `v*` tag）会自动走“首个发布”口径，无对比基准。

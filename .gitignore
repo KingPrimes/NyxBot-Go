@@ -27,4 +27,8 @@ plans/
 # 测试生成的图片临时目录
 /temp/
 
+# 本地预览 release notes / 汇总发布产物时的工作目录（CI 里由 release job 生成）
+/release-assets/
+/release-notes.md
+
 /.workflow/

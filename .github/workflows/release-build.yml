@@ -12,6 +12,7 @@ on:
     tags:
       - "v*"
 
+# 工作流级权限保持最小（contents 只读）；只有 release job 单独申请 contents: write 来创建 Release
 permissions:
   contents: read
   packages: write
@@ -53,6 +54,10 @@ jobs:
   frontend:
     name: Build Frontend
     runs-on: ubuntu-latest
+    # 实际用到的 WebUI 提交号要写进发布说明，便于回溯二进制里内嵌的是哪一版前端
+    outputs:
+      webui_commit: ${{ steps.webui_rev.outputs.commit }}
+      webui_subject: ${{ steps.webui_rev.outputs.subject }}
     steps:
       - name: Checkout ${{ env.WEBUI_REPOSITORY }}
         uses: actions/checkout@v4
@@ -63,6 +68,7 @@ jobs:
           path: NyxBot-WebUI
           persist-credentials: false
       - name: Report frontend revision
+        id: webui_rev
         working-directory: NyxBot-WebUI
         shell: bash
         env:
@@ -74,6 +80,10 @@ jobs:
           echo "frontend commit : $(git rev-parse HEAD)"
           echo "frontend subject: $(git log -1 --format='%s')"
           echo "requested ref   : '${REQUESTED_REF}' (repo variable WEBUI_REF='${REPO_VAR_REF}')"
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "subject=$(git log -1 --format='%s')"
+          } >> "$GITHUB_OUTPUT"
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -306,3 +316,64 @@ jobs:
             PRODUCT_NAME=${{ needs.metadata.outputs.product_name }}
             DESCRIPTION=${{ needs.metadata.outputs.description }}
             VCS_REF=${{ github.sha }}
+
+  release:
+    name: GitHub Release
+    # 只在 tag 上发版：workflow_dispatch 跑在分支上时只出 artifact；想手动发版，就在触发时把
+    # "Use workflow from" 选成目标 tag（此时 github.ref_type 为 tag，本 job 照常执行）。
+    if: github.ref_type == 'tag'
+    # 等齐三平台产物再发版；docker job 刻意不参与阻塞（草稿本身就是人工审核闸门）
+    needs: [metadata, frontend, linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 创建 Release 需要；工作流级默认权限仍是 contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要完整历史与全部 tag：用来定位上一版本、生成变更明细与贡献者名单
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ needs.metadata.outputs.executable_name }}-*
+          merge-multiple: true
+          path: release-assets
+      - name: Generate checksums
+        working-directory: release-assets
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Generate release notes
+        env:
+          EXECUTABLE_NAME: ${{ needs.metadata.outputs.executable_name }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          PRODUCT_NAME: ${{ needs.metadata.outputs.product_name }}
+          WEBUI_COMMIT: ${{ needs.frontend.outputs.webui_commit }}
+          WEBUI_SUBJECT: ${{ needs.frontend.outputs.webui_subject }}
+          WEBUI_REPOSITORY: ${{ env.WEBUI_REPOSITORY }}
+          # gh CLI 读 GH_TOKEN，用它把提交邮箱映射成 GitHub 登录名；不可用时脚本回退为提交作者名
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/generate-release-notes.sh > release-notes.md
+          # 正文异常时不留空白发布说明（发布说明失败不该阻断发版，人工审核草稿时能看到告警）
+          if [[ ! -s release-notes.md ]]; then
+            printf '# %s %s\n\n发布说明自动生成失败，请参考仓库提交记录。\n' "$PRODUCT_NAME" "$VERSION" > release-notes.md
+            echo "::warning title=发布说明生成失败::generate-release-notes.sh 未产出内容，已回退为最小正文"
+          fi
+          cat release-notes.md
+      - name: Create Release & upload assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ needs.metadata.outputs.product_name }} ${{ needs.metadata.outputs.version }}
+          body_path: release-notes.md
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          # 与 Java 端（NyxBot/.github/workflows/build-release.yml）一致：先建草稿，人工审核后再发布
+          draft: true
+          make_latest: true
+          # 自定义正文在前，其后由 GitHub 追加自动生成的 What's Changed / New Contributors
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
