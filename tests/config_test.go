@@ -413,6 +413,97 @@ log: {level: INFO, startup: true, console: true, dir: data/logs, max_file_size_m
 	}
 }
 
+// TestRuntimeUpdateWithEnvOverride 验证存在环境变量覆盖时保存仍然成功：
+// 补丁校验必须拿「文件派生值」比对，而不是「环境变量生效后的值」（文件里并没有 env 的值）。
+func TestRuntimeUpdateWithEnvOverride(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	// 先落一份完整默认配置（含 port: "8080"）
+	config.LoadFrom(path)
+	t.Setenv("APP_PORT", "19090")
+
+	cfg := config.LoadFrom(path)
+	if cfg.Server.Port != "19090" {
+		t.Fatalf("环境变量未生效: %q", cfg.Server.Port)
+	}
+	rt := config.NewRuntime(cfg, path)
+	if err := rt.Update(func(c *config.Config) { c.Log.Level = "DEBUG" }); err != nil {
+		t.Fatalf("存在环境变量覆盖时保存不应失败: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `port: "8080"`) {
+		t.Errorf("文件里的 YAML 值不应被环境变量值覆盖:\n%s", text)
+	}
+	if !strings.Contains(text, "level: DEBUG") {
+		t.Errorf("变更未写入:\n%s", text)
+	}
+	if rt.Config().Server.Port != "19090" {
+		t.Errorf("保存后生效配置应仍受环境变量覆盖: %q", rt.Config().Server.Port)
+	}
+	if reloaded := config.LoadFrom(path); reloaded.Log.Level != "DEBUG" {
+		t.Errorf("重新加载变更未生效: %q", reloaded.Log.Level)
+	}
+}
+
+// TestRuntimeUpdateDetectsInPlaceSliceEdit 验证回调原地修改切片元素时也会写回文件
+// （Update 需先复制切片，否则 before/after 共享底层数组导致差异被吞掉）。
+func TestRuntimeUpdateDetectsInPlaceSliceEdit(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	original := "server:\n  port: \"18080\"\n  trusted_proxies:\n    - \"1.1.1.1\"\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.LoadFrom(path)
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := config.NewRuntime(cfg, path)
+	if err := rt.Update(func(c *config.Config) { c.Server.TrustedProxies[0] = "2.2.2.2" }); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "2.2.2.2") {
+		t.Errorf("原地修改切片元素未被写回:\n%s", string(data))
+	}
+}
+
+// TestRuntimeUpdateKeepsFileMode 验证保存不会改变 config.yaml 的权限位
+// （原子写入用 CreateTemp 会默认 0600，需按原文件权限 Chmod；Windows 无 POSIX 权限位，断言天然成立）。
+func TestRuntimeUpdateKeepsFileMode(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	config.LoadFrom(path)
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := config.NewRuntime(config.LoadFrom(path), path)
+	if err := rt.Update(func(c *config.Config) { c.Log.Level = "DEBUG" }); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Errorf("保存后权限位被改变: %v → %v", before.Mode().Perm(), after.Mode().Perm())
+	}
+}
+
 // TestRuntimeUpdateKeepsFileWhenConfigBroken 验证配置文件无法解析时拒绝写入：
 // 保存接口报错（不静默整份重写），用户文件逐字节保留。
 func TestRuntimeUpdateKeepsFileWhenConfigBroken(t *testing.T) {

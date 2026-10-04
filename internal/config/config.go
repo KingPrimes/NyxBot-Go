@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 
@@ -108,15 +109,36 @@ func (c Config) Addr() string {
 // Runtime 持有运行期配置，提供并发安全的读取与原子更新（改内存 + 落盘 YAML）。
 // 保存接口等运行期修改通过 Update 完成，使新值立即对后续 Config() 调用生效；
 // 监听端口等启动期参数仍需重启进程才会应用。
+// cfg 是生效配置（含环境变量覆盖），base 是文件派生配置（不含环境变量覆盖）：
+// 最小写入与补丁校验都以 base 为基准，环境变量只影响运行期行为，既不写进文件、也不会让保存失败。
 type Runtime struct {
 	mu   sync.RWMutex
 	cfg  Config
+	base Config
 	path string
 }
 
 // NewRuntime 基于初始配置和落盘路径创建运行时配置持有者。
+// cfg 为环境变量覆盖后的生效配置；base 从 path 读取（文件不可读或无法解析时退回 cfg）。
 func NewRuntime(cfg Config, path string) *Runtime {
-	return &Runtime{cfg: cfg, path: path}
+	return &Runtime{cfg: cfg, base: fileConfig(path, cfg), path: path}
+}
+
+// fileConfig 读取 path 得到「不含环境变量覆盖」的配置；读不到或无法解析时退回 effective。
+func fileConfig(path string, effective Config) Config {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return effective
+	}
+	base := defaultConfig()
+	if err := yaml.Unmarshal(raw, &base); err != nil {
+		return effective
+	}
+	// 文件里缺 jwt_secret：沿用生效配置里生成的那个，补写时落盘，使重启后 token 不失效
+	if base.Auth.JwtSecret == "" {
+		base.Auth.JwtSecret = effective.Auth.JwtSecret
+	}
+	return base
 }
 
 // Config 返回当前配置的快照副本。
@@ -132,18 +154,26 @@ func (r *Runtime) Path() string {
 }
 
 // Update 在写锁内通过 fn 修改配置，随后把改动最小化写回 YAML 文件：
+// 以文件派生配置为基准比对（环境变量覆盖不参与，避免"文件里没有 env 值 → 校验必然失败"），
 // 只更新值发生变化的键，并把结构体里有、文件里缺的键补写回去（见 syncConfigFile），
 // 写入了哪些键以 INFO 记录（便于排查"改了没生效"）。
 // 写文件失败（或补丁校验不通过）时内存中的修改仍然保留，调用方可据此决定是否向客户端报错。
 func (r *Runtime) Update(fn func(*Config)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	before := r.cfg
-	fn(&r.cfg)
-	result, err := syncConfigFile(r.path, before, r.cfg)
+	before := r.base
+	updated := r.base
+	// 回调可能原地修改切片元素：先复制，否则 before/updated 共享底层数组会把差异吞掉
+	updated.Server.TrustedProxies = slices.Clone(r.base.Server.TrustedProxies)
+	fn(&updated)
+	result, err := syncConfigFile(r.path, before, updated)
 	if err != nil {
 		return err
 	}
+	r.base = updated
+	effective := updated
+	overrideFromEnv(&effective)
+	r.cfg = effective
 	if len(result.Changed) > 0 || len(result.Added) > 0 {
 		logging.InfoPack("config", "%s saved: changed [%s], missing filled [%s]",
 			r.path, strings.Join(result.Changed, ", "), strings.Join(result.Added, ", "))
@@ -263,13 +293,25 @@ func configNode(cfg Config) (*yaml.Node, error) {
 }
 
 // writeFileAtomic 先写同目录临时文件再改名，避免写入中断留下半截配置。
+// 临时文件默认权限为 0600，直接改名会把原文件的 0644 降级，故先按原文件权限位 Chmod
+// （文件不存在时用 0644；Windows 无 POSIX 权限位，Chmod 只影响只读属性）。
 func writeFileAtomic(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpPath := tmp.Name()
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
