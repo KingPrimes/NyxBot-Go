@@ -95,26 +95,118 @@ func TestLoadFromGeneratesRandomJwtSecret(t *testing.T) {
 	}
 }
 
-// TestLoadFromEmptyJwtSecretFallback 验证已有配置缺失 jwt_secret 时，
-// 在内存中生成随机密钥兜底且不覆盖用户文件。
-func TestLoadFromEmptyJwtSecretFallback(t *testing.T) {
+// TestLoadFromMissingJwtSecretGeneratedAndPersisted 验证已有配置缺失 jwt_secret 时：
+// 生成随机密钥并在启动补写时落盘（重启后 token 不失效），原有内容逐字节保留。
+func TestLoadFromMissingJwtSecretGeneratedAndPersisted(t *testing.T) {
 	neutralizeConfigEnv(t)
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	original := []byte("server:\n  port: \"8080\"\n")
-	if err := os.WriteFile(path, original, 0644); err != nil {
+	original := "server:\n  port: \"8080\"\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg := config.LoadFrom(path)
 	if cfg.Auth.JwtSecret == "" {
-		t.Error("缺失 jwt_secret 时未生成兜底密钥")
+		t.Fatal("缺失 jwt_secret 时未生成兜底密钥")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != string(original) {
-		t.Error("兜底逻辑不应改写用户已有的配置文件")
+	if !strings.HasPrefix(string(data), original) {
+		t.Errorf("原有内容被改动:\n%s", string(data))
+	}
+	if !strings.Contains(string(data), "jwt_secret: "+cfg.Auth.JwtSecret) {
+		t.Errorf("启动补写未把生成的 jwt_secret 落盘:\n%s", string(data))
+	}
+	// 重新加载：密钥保持不变（不会因重启让已发 token 失效），端口等既有值也不变
+	again := config.LoadFrom(path)
+	if again.Auth.JwtSecret != cfg.Auth.JwtSecret {
+		t.Error("重新加载后 jwt_secret 发生变化")
+	}
+	if again.Server.Port != "8080" {
+		t.Errorf("重新加载端口异常: %q", again.Server.Port)
+	}
+}
+
+// TestLoadFromFillsMissingKeys 验证启动加载会检测「结构体里有、文件里缺」的配置项并按注释补写：
+// 原有内容（自定义注释、未知键、键序、末尾换行）逐字节保留，检测结果有 WARN 提示，
+// 且再次加载不会重复补写（幂等）。
+func TestLoadFromFillsMissingKeys(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	original := `# 我手写的注释
+server:
+  port: "18080"
+  gin_mode: release
+  request_log: false
+  trusted_proxies: []
+
+# 自定义键（结构体里没有）必须保留
+my_custom_key: hello
+
+log:
+  level: INFO
+  startup: true
+  console: true
+  dir: data/logs
+  max_file_size_mb: 5
+  max_age_days: 7
+  history_size: 50
+  sql_level: warn
+`
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadFrom(path)
+	if cfg.Log.SQLSlowMS != 600 {
+		t.Errorf("缺失项未按默认值生效: sql_slow_ms=%d", cfg.Log.SQLSlowMS)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	// 缺失项按注释补写
+	for _, want := range []string{
+		"# GORM 慢查询告警阈值（毫秒），0=默认 600；不想看慢查询告警请把 sql_level 设为 error",
+		"  sql_slow_ms: 600",
+		"# SQLite 数据库配置",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("缺失配置项未补写: %q\n---\n%s", want, text)
+		}
+	}
+	// 原有每一行都在，且末尾换行保持
+	for _, line := range strings.Split(strings.TrimRight(original, "\n"), "\n") {
+		if !strings.Contains(text, line) {
+			t.Errorf("原始行被改动或丢失: %q\n---\n%s", line, text)
+		}
+	}
+	if !strings.HasSuffix(text, "\n") {
+		t.Error("末尾换行被改动")
+	}
+	// 检测结果必须可见（WARN 列出补写的键）
+	warned := false
+	for _, entry := range logging.Recent(logging.LevelWarn) {
+		if entry.Pack == "config" && strings.Contains(entry.Message, "缺少") &&
+			strings.Contains(entry.Message, "log.sql_slow_ms") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Error("启动补写缺失配置项时未输出 WARN 提示")
+	}
+	// 幂等：再次加载不改动文件
+	config.LoadFrom(path)
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(second) != text {
+		t.Errorf("重复加载改动了文件:\n%s", string(second))
 	}
 }
 
@@ -210,7 +302,13 @@ log:
 	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	rt := config.NewRuntime(config.LoadFrom(path), path)
+	// LoadFrom 会在启动时补写缺失键（由 TestLoadFromFillsMissingKeys 覆盖）；
+	// 这里把文件复原为「缺键」状态，用于验证保存路径同样只做最小写入并补写缺失键
+	cfg := config.LoadFrom(path)
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := config.NewRuntime(cfg, path)
 	if err := rt.Update(func(c *config.Config) { c.Server.Port = "9090" }); err != nil {
 		t.Fatalf("保存配置失败: %v", err)
 	}
@@ -284,7 +382,12 @@ log: {level: INFO, startup: true, console: true, dir: data/logs, max_file_size_m
 	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	rt := config.NewRuntime(config.LoadFrom(path), path)
+	// 同上：加载后再把文件复原为含流式分节的旧内容，让 Update 处理这份漂移的文件
+	cfg := config.LoadFrom(path)
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := config.NewRuntime(cfg, path)
 	if err := rt.Update(func(c *config.Config) { c.Log.Level = "DEBUG" }); err != nil {
 		t.Fatalf("流式分节的保存不应失败: %v", err)
 	}

@@ -132,14 +132,23 @@ func (r *Runtime) Path() string {
 }
 
 // Update 在写锁内通过 fn 修改配置，随后把改动最小化写回 YAML 文件：
-// 只更新值发生变化的键，并把结构体里有、文件里缺的键补写回去（见 syncConfigFile）。
+// 只更新值发生变化的键，并把结构体里有、文件里缺的键补写回去（见 syncConfigFile），
+// 写入了哪些键以 INFO 记录（便于排查"改了没生效"）。
 // 写文件失败（或补丁校验不通过）时内存中的修改仍然保留，调用方可据此决定是否向客户端报错。
 func (r *Runtime) Update(fn func(*Config)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	before := r.cfg
 	fn(&r.cfg)
-	return syncConfigFile(r.path, before, r.cfg)
+	result, err := syncConfigFile(r.path, before, r.cfg)
+	if err != nil {
+		return err
+	}
+	if len(result.Changed) > 0 || len(result.Added) > 0 {
+		logging.InfoPack("config", "%s saved: changed [%s], missing filled [%s]",
+			r.path, strings.Join(result.Changed, ", "), strings.Join(result.Added, ", "))
+	}
+	return nil
 }
 
 // Load 加载默认路径 config.yaml 的配置文件，返回合并了环境变量覆盖的完整配置。
@@ -148,26 +157,46 @@ func Load() Config {
 }
 
 // LoadFrom 加载指定路径的配置文件，缺失时生成默认配置（JWT 密钥随机生成并随文件落盘）。
+// 文件已存在时：解析后按结构体检测「有键缺失」，并把缺失项按注释补写到文件里（只补缺，不动其它内容），
+// 同时记一条 WARN 列出补写的键——避免新增配置项只能靠代码默认值"隐身"。
 // 按优先级：默认值 < YAML 文件 < 环境变量。
 func LoadFrom(path string) Config {
 	cfg := defaultConfig()
 
-	if data, err := os.ReadFile(path); err == nil {
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
+	raw, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil:
+		if err := yaml.Unmarshal(raw, &cfg); err != nil {
+			// 内容不可用：不补写、不改写用户文件，后续 jwt 兜底也只驻留内存
 			logging.WarnPack("config", "%s parse error, using defaults: %v", path, err)
+			break
 		}
-	} else {
+		if cfg.Auth.JwtSecret == "" {
+			cfg.Auth.JwtSecret = generateJwtSecret()
+		}
+		// 检测并补写缺失配置项（写失败只告警，不影响启动；环境变量尚未覆盖，不会把 env 值写进文件）
+		added, err := fillMissingConfigKeys(path, cfg)
+		switch {
+		case err != nil:
+			logging.WarnPack("config", "检测/补写 %s 的缺失配置项失败: %v", path, err)
+		case len(added) > 0:
+			logging.WarnPack("config", "%s 缺少 %d 个配置项（%s），已按注释补写；请检查这些默认值是否符合预期",
+				path, len(added), strings.Join(added, ", "))
+		}
+	case os.IsNotExist(readErr):
 		cfg.Auth.JwtSecret = generateJwtSecret()
 		if err := writeConfig(path, cfg); err != nil {
 			logging.ErrorPack("config", "%s not found and create default config failed: %v", path, err)
 		} else {
 			logging.InfoPack("config", "%s not found, default config created", path)
 		}
+	default:
+		logging.ErrorPack("config", "read %s failed: %v", path, readErr)
 	}
 
 	if cfg.Auth.JwtSecret == "" {
-		// 配置文件存在但未设置 jwt_secret（或内容损坏）：随机生成一个保证鉴权可用，
-		// 仅驻留内存不落盘以避免覆盖用户文件，重启后旧 token 失效。
+		// 配置文件存在但内容损坏（未解析成功）：随机生成一个保证鉴权可用，
+		// 仅驻留内存不落盘以避免覆盖用户的文件，重启后旧 token 失效。
 		cfg.Auth.JwtSecret = generateJwtSecret()
 		logging.WarnPack("config", "jwt_secret not set, random secret generated in memory; set jwt_secret in %s to keep tokens valid after restart", path)
 	}

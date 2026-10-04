@@ -29,38 +29,53 @@ type patchEdit struct {
 	lines []string
 }
 
+// patchResult 一次最小写入的结果：补写的键（结构体里有、文件里缺）与修改的键（值发生变化）。
+type patchResult struct {
+	Added   []string // 补写的键路径，如 log.sql_slow_ms
+	Changed []string // 值被改写的键路径
+}
+
+// patchContext 补丁收集上下文：编辑列表 + 结果记录。
+type patchContext struct {
+	lines   []string
+	edits   []patchEdit
+	added   []string
+	changed []string
+}
+
 // syncConfigFile 依据 before → after 的差异最小化写回 path：
 // 只改动值变化的键所在行，并补齐结构体里有而文件里缺的键；文件不存在时退回整份生成。
-func syncConfigFile(path string, before, after Config) error {
+// 返回本次补写/修改了哪些键（供调用方日志）。
+func syncConfigFile(path string, before, after Config) (patchResult, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return writeConfig(path, after)
+			return patchResult{}, writeConfig(path, after)
 		}
-		return err
+		return patchResult{}, err
 	}
 
 	beforeNode, err := configNode(before)
 	if err != nil {
-		return err
+		return patchResult{}, err
 	}
 	afterNode, err := configNode(after)
 	if err != nil {
-		return err
+		return patchResult{}, err
 	}
 	var fileNode yaml.Node
 	if err := yaml.Unmarshal(raw, &fileNode); err != nil {
-		return fmt.Errorf("%s 解析失败，为免覆盖现有内容未写入: %w", path, err)
+		return patchResult{}, fmt.Errorf("%s 解析失败，为免覆盖现有内容未写入: %w", path, err)
 	}
 
 	lineEnding := configLineEnding(raw)
 	lines, trailingNewline := configLines(raw)
-	edits := make([]patchEdit, 0, 8)
-	if err := collectPatches(documentMapping(&fileNode), documentMapping(afterNode), documentMapping(beforeNode), "", 0, lines, &edits); err != nil {
-		return err
+	ctx := &patchContext{lines: lines}
+	if err := collectPatches(documentMapping(&fileNode), documentMapping(afterNode), documentMapping(beforeNode), "", "", 0, ctx); err != nil {
+		return patchResult{}, err
 	}
 
-	patched := applyPatches(lines, edits)
+	patched := applyPatches(lines, ctx.edits)
 	content := []byte(strings.Join(patched, lineEnding))
 	if trailingNewline {
 		content = append(content, lineEnding...)
@@ -68,29 +83,49 @@ func syncConfigFile(path string, before, after Config) error {
 	// 校验：补丁结果必须能解析成与 after 等价的配置，否则宁可不写（避免写出坏配置）
 	var check Config
 	if err := yaml.Unmarshal(content, &check); err != nil {
-		return fmt.Errorf("配置补丁校验失败，未写入: %w", err)
+		return patchResult{}, fmt.Errorf("配置补丁校验失败，未写入: %w", err)
 	}
 	if !sameConfig(check, after) {
-		return fmt.Errorf("配置补丁校验失败：写回结果与期望配置不一致，未写入")
+		return patchResult{}, fmt.Errorf("配置补丁校验失败：写回结果与期望配置不一致，未写入")
 	}
-	return writeFileAtomic(path, content)
+	if err := writeFileAtomic(path, content); err != nil {
+		return patchResult{}, err
+	}
+	return patchResult{Added: ctx.added, Changed: ctx.changed}, nil
+}
+
+// fillMissingConfigKeys 只补「结构体里有、文件里缺」的配置项（不改任何已有值），返回补写的键路径。
+// 供启动加载时检测并补齐使用。
+func fillMissingConfigKeys(path string, cfg Config) ([]string, error) {
+	result, err := syncConfigFile(path, cfg, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return result.Added, nil
 }
 
 // collectPatches 递归比对一个映射节点，收集最小改动：
 // 已有键中值发生变化的只替换该键的原始行，after 里有而文件里没有的键整体补写到映射末尾。
-func collectPatches(file, after, before *yaml.Node, indent string, depth int, lines []string, edits *[]patchEdit) error {
+// path 为当前映射的点分路径（顶层为空），用于记录补写/修改了哪些键。
+func collectPatches(file, after, before *yaml.Node, path, indent string, depth int, ctx *patchContext) error {
 	if file.Kind != yaml.MappingNode || file.Style == yaml.FlowStyle {
 		// 文件里这个键不是块状映射（标量/null/流式 {}）：整体替换由上层负责，这里不动
 		return nil
 	}
 
 	missing := make([]*yaml.Node, 0, 4)
+	missingPaths := make([]string, 0, 4)
 	for i := 0; i+1 < len(after.Content); i += 2 {
 		afterKey, afterValue := after.Content[i], after.Content[i+1]
 		fileKey, fileValue, found := mappingPair(file, afterKey.Value)
+		keyPath := afterKey.Value
+		if path != "" {
+			keyPath = path + "." + afterKey.Value
+		}
 		if !found {
 			// 结构体里有、文件里缺：整项（含注释与嵌套键）补写
 			missing = append(missing, afterKey, afterValue)
+			missingPaths = append(missingPaths, keyPath)
 			continue
 		}
 
@@ -98,12 +133,12 @@ func collectPatches(file, after, before *yaml.Node, indent string, depth int, li
 		if afterValue.Kind == yaml.MappingNode && fileValue.Kind == yaml.MappingNode {
 			if fileValue.Style == yaml.FlowStyle {
 				// 文件里这一节写成了流式 {…}：无法逐行补丁，退化为「只替换这一节」的块状渲染
-				if err := appendReplacement(edits, fileKey, fileValue, afterValue, indent, depth); err != nil {
+				if err := appendReplacement(ctx, keyPath, fileKey, fileValue, afterValue, indent, depth); err != nil {
 					return err
 				}
 				continue
 			}
-			if err := collectPatches(fileValue, afterValue, beforeValue, indent+"  ", depth+1, lines, edits); err != nil {
+			if err := collectPatches(fileValue, afterValue, beforeValue, keyPath, indent+"  ", depth+1, ctx); err != nil {
 				return err
 			}
 			continue
@@ -111,7 +146,7 @@ func collectPatches(file, after, before *yaml.Node, indent string, depth int, li
 		if beforeValue != nil && sameNode(afterValue, beforeValue) {
 			continue // 值没有变化
 		}
-		if err := appendReplacement(edits, fileKey, fileValue, afterValue, indent, depth); err != nil {
+		if err := appendReplacement(ctx, keyPath, fileKey, fileValue, afterValue, indent, depth); err != nil {
 			return err
 		}
 	}
@@ -123,16 +158,17 @@ func collectPatches(file, after, before *yaml.Node, indent string, depth int, li
 		}
 		anchor := maxNodeLine(file)
 		if anchor == 0 {
-			anchor = len(lines)
+			anchor = len(ctx.lines)
 		}
-		*edits = append(*edits, patchEdit{start: anchor + 1, end: anchor, depth: depth, lines: rendered})
+		ctx.edits = append(ctx.edits, patchEdit{start: anchor + 1, end: anchor, depth: depth, lines: rendered})
+		ctx.added = append(ctx.added, missingPaths...)
 	}
 	return nil
 }
 
 // appendReplacement 生成「替换某一项」的补丁：保留文件里的键名与行内注释，
 // 值按 after 节点重新渲染；行前注释（HeadComment）留在文件里不动，避免重复。
-func appendReplacement(edits *[]patchEdit, fileKey, fileValue, afterValue *yaml.Node, indent string, depth int) error {
+func appendReplacement(ctx *patchContext, keyPath string, fileKey, fileValue, afterValue *yaml.Node, indent string, depth int) error {
 	keyCopy := *fileKey
 	keyCopy.HeadComment, keyCopy.FootComment, keyCopy.LineComment = "", "", ""
 	valueCopy := *afterValue
@@ -150,7 +186,8 @@ func appendReplacement(edits *[]patchEdit, fileKey, fileValue, afterValue *yaml.
 	if end < start {
 		end = start
 	}
-	*edits = append(*edits, patchEdit{start: start, end: end, depth: depth, lines: rendered})
+	ctx.edits = append(ctx.edits, patchEdit{start: start, end: end, depth: depth, lines: rendered})
+	ctx.changed = append(ctx.changed, keyPath)
 	return nil
 }
 
