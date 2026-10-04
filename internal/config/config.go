@@ -7,7 +7,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 
@@ -107,15 +109,36 @@ func (c Config) Addr() string {
 // Runtime 持有运行期配置，提供并发安全的读取与原子更新（改内存 + 落盘 YAML）。
 // 保存接口等运行期修改通过 Update 完成，使新值立即对后续 Config() 调用生效；
 // 监听端口等启动期参数仍需重启进程才会应用。
+// cfg 是生效配置（含环境变量覆盖），base 是文件派生配置（不含环境变量覆盖）：
+// 最小写入与补丁校验都以 base 为基准，环境变量只影响运行期行为，既不写进文件、也不会让保存失败。
 type Runtime struct {
 	mu   sync.RWMutex
 	cfg  Config
+	base Config
 	path string
 }
 
 // NewRuntime 基于初始配置和落盘路径创建运行时配置持有者。
+// cfg 为环境变量覆盖后的生效配置；base 从 path 读取（文件不可读或无法解析时退回 cfg）。
 func NewRuntime(cfg Config, path string) *Runtime {
-	return &Runtime{cfg: cfg, path: path}
+	return &Runtime{cfg: cfg, base: fileConfig(path, cfg), path: path}
+}
+
+// fileConfig 读取 path 得到「不含环境变量覆盖」的配置；读不到或无法解析时退回 effective。
+func fileConfig(path string, effective Config) Config {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return effective
+	}
+	base := defaultConfig()
+	if err := yaml.Unmarshal(raw, &base); err != nil {
+		return effective
+	}
+	// 文件里缺 jwt_secret：沿用生效配置里生成的那个，补写时落盘，使重启后 token 不失效
+	if base.Auth.JwtSecret == "" {
+		base.Auth.JwtSecret = effective.Auth.JwtSecret
+	}
+	return base
 }
 
 // Config 返回当前配置的快照副本。
@@ -130,13 +153,32 @@ func (r *Runtime) Path() string {
 	return r.path
 }
 
-// Update 在写锁内通过 fn 修改配置，随后将完整配置写回 YAML 文件。
-// 写文件失败时内存中的修改仍然保留，调用方可据此决定是否向客户端报错。
+// Update 在写锁内通过 fn 修改配置，随后把改动最小化写回 YAML 文件：
+// 以文件派生配置为基准比对（环境变量覆盖不参与，避免"文件里没有 env 值 → 校验必然失败"），
+// 只更新值发生变化的键，并把结构体里有、文件里缺的键补写回去（见 syncConfigFile），
+// 写入了哪些键以 INFO 记录（便于排查"改了没生效"）。
+// 写文件失败（或补丁校验不通过）时内存中的修改仍然保留，调用方可据此决定是否向客户端报错。
 func (r *Runtime) Update(fn func(*Config)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fn(&r.cfg)
-	return writeConfig(r.path, r.cfg)
+	before := r.base
+	updated := r.base
+	// 回调可能原地修改切片元素：先复制，否则 before/updated 共享底层数组会把差异吞掉
+	updated.Server.TrustedProxies = slices.Clone(r.base.Server.TrustedProxies)
+	fn(&updated)
+	result, err := syncConfigFile(r.path, before, updated)
+	if err != nil {
+		return err
+	}
+	r.base = updated
+	effective := updated
+	overrideFromEnv(&effective)
+	r.cfg = effective
+	if len(result.Changed) > 0 || len(result.Added) > 0 {
+		logging.InfoPack("config", "%s saved: changed [%s], missing filled [%s]",
+			r.path, strings.Join(result.Changed, ", "), strings.Join(result.Added, ", "))
+	}
+	return nil
 }
 
 // Load 加载默认路径 config.yaml 的配置文件，返回合并了环境变量覆盖的完整配置。
@@ -145,26 +187,46 @@ func Load() Config {
 }
 
 // LoadFrom 加载指定路径的配置文件，缺失时生成默认配置（JWT 密钥随机生成并随文件落盘）。
+// 文件已存在时：解析后按结构体检测「有键缺失」，并把缺失项按注释补写到文件里（只补缺，不动其它内容），
+// 同时记一条 WARN 列出补写的键——避免新增配置项只能靠代码默认值"隐身"。
 // 按优先级：默认值 < YAML 文件 < 环境变量。
 func LoadFrom(path string) Config {
 	cfg := defaultConfig()
 
-	if data, err := os.ReadFile(path); err == nil {
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
+	raw, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil:
+		if err := yaml.Unmarshal(raw, &cfg); err != nil {
+			// 内容不可用：不补写、不改写用户文件，后续 jwt 兜底也只驻留内存
 			logging.WarnPack("config", "%s parse error, using defaults: %v", path, err)
+			break
 		}
-	} else {
+		if cfg.Auth.JwtSecret == "" {
+			cfg.Auth.JwtSecret = generateJwtSecret()
+		}
+		// 检测并补写缺失配置项（写失败只告警，不影响启动；环境变量尚未覆盖，不会把 env 值写进文件）
+		added, err := fillMissingConfigKeys(path, cfg)
+		switch {
+		case err != nil:
+			logging.WarnPack("config", "检测/补写 %s 的缺失配置项失败: %v", path, err)
+		case len(added) > 0:
+			logging.WarnPack("config", "%s 缺少 %d 个配置项（%s），已按注释补写；请检查这些默认值是否符合预期",
+				path, len(added), strings.Join(added, ", "))
+		}
+	case os.IsNotExist(readErr):
 		cfg.Auth.JwtSecret = generateJwtSecret()
 		if err := writeConfig(path, cfg); err != nil {
 			logging.ErrorPack("config", "%s not found and create default config failed: %v", path, err)
 		} else {
 			logging.InfoPack("config", "%s not found, default config created", path)
 		}
+	default:
+		logging.ErrorPack("config", "read %s failed: %v", path, readErr)
 	}
 
 	if cfg.Auth.JwtSecret == "" {
-		// 配置文件存在但未设置 jwt_secret（或内容损坏）：随机生成一个保证鉴权可用，
-		// 仅驻留内存不落盘以避免覆盖用户文件，重启后旧 token 失效。
+		// 配置文件存在但内容损坏（未解析成功）：随机生成一个保证鉴权可用，
+		// 仅驻留内存不落盘以避免覆盖用户的文件，重启后旧 token 失效。
 		cfg.Auth.JwtSecret = generateJwtSecret()
 		logging.WarnPack("config", "jwt_secret not set, random secret generated in memory; set jwt_secret in %s to keep tokens valid after restart", path)
 	}
@@ -188,25 +250,24 @@ func generateJwtSecret() string {
 	return hex.EncodeToString(buf)
 }
 
-// writeConfig 将配置以带字段注释的 YAML 格式写入指定路径。
+// writeConfig 将配置以带字段注释的 YAML 格式整份写入指定路径（仅在文件不存在或需要重建时使用）。
 func writeConfig(path string, cfg Config) error {
 	data, err := marshalWithComments(cfg)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return writeFileAtomic(path, data)
 }
 
 // marshalWithComments 将配置编码为带注释的 YAML 字节流。
 // 注释文本取自结构体字段的 comment 标签，作为头注释挂到对应条目上方；
 // 顶层分节之间插入空行便于阅读。
 func marshalWithComments(cfg Config) ([]byte, error) {
-	node := &yaml.Node{}
-	if err := node.Encode(cfg); err != nil {
+	node, err := configNode(cfg)
+	if err != nil {
 		return nil, err
 	}
-	applyComments(node, "", fieldComments())
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -218,6 +279,53 @@ func marshalWithComments(cfg Config) ([]byte, error) {
 		return nil, err
 	}
 	return separateSections(buf.Bytes()), nil
+}
+
+// configNode 把配置编码为 YAML 节点树，并按 comment 标签挂上各键的头注释。
+// 供整份生成（marshalWithComments）与最小写入（syncConfigFile）共用。
+func configNode(cfg Config) (*yaml.Node, error) {
+	node := &yaml.Node{}
+	if err := node.Encode(cfg); err != nil {
+		return nil, err
+	}
+	applyComments(node, "", fieldComments())
+	return node, nil
+}
+
+// writeFileAtomic 先写同目录临时文件再改名，避免写入中断留下半截配置。
+// 临时文件默认权限为 0600，直接改名会把原文件的 0644 降级，故先按原文件权限位 Chmod
+// （文件不存在时用 0644；Windows 无 POSIX 权限位，Chmod 只影响只读属性）。
+func writeFileAtomic(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // fieldComments 通过反射收集 Config 结构体字段的 comment 标签，

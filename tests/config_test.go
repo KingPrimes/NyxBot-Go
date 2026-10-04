@@ -95,26 +95,118 @@ func TestLoadFromGeneratesRandomJwtSecret(t *testing.T) {
 	}
 }
 
-// TestLoadFromEmptyJwtSecretFallback 验证已有配置缺失 jwt_secret 时，
-// 在内存中生成随机密钥兜底且不覆盖用户文件。
-func TestLoadFromEmptyJwtSecretFallback(t *testing.T) {
+// TestLoadFromMissingJwtSecretGeneratedAndPersisted 验证已有配置缺失 jwt_secret 时：
+// 生成随机密钥并在启动补写时落盘（重启后 token 不失效），原有内容逐字节保留。
+func TestLoadFromMissingJwtSecretGeneratedAndPersisted(t *testing.T) {
 	neutralizeConfigEnv(t)
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	original := []byte("server:\n  port: \"8080\"\n")
-	if err := os.WriteFile(path, original, 0644); err != nil {
+	original := "server:\n  port: \"8080\"\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg := config.LoadFrom(path)
 	if cfg.Auth.JwtSecret == "" {
-		t.Error("缺失 jwt_secret 时未生成兜底密钥")
+		t.Fatal("缺失 jwt_secret 时未生成兜底密钥")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != string(original) {
-		t.Error("兜底逻辑不应改写用户已有的配置文件")
+	if !strings.HasPrefix(string(data), original) {
+		t.Errorf("原有内容被改动:\n%s", string(data))
+	}
+	if !strings.Contains(string(data), "jwt_secret: "+cfg.Auth.JwtSecret) {
+		t.Errorf("启动补写未把生成的 jwt_secret 落盘:\n%s", string(data))
+	}
+	// 重新加载：密钥保持不变（不会因重启让已发 token 失效），端口等既有值也不变
+	again := config.LoadFrom(path)
+	if again.Auth.JwtSecret != cfg.Auth.JwtSecret {
+		t.Error("重新加载后 jwt_secret 发生变化")
+	}
+	if again.Server.Port != "8080" {
+		t.Errorf("重新加载端口异常: %q", again.Server.Port)
+	}
+}
+
+// TestLoadFromFillsMissingKeys 验证启动加载会检测「结构体里有、文件里缺」的配置项并按注释补写：
+// 原有内容（自定义注释、未知键、键序、末尾换行）逐字节保留，检测结果有 WARN 提示，
+// 且再次加载不会重复补写（幂等）。
+func TestLoadFromFillsMissingKeys(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	original := `# 我手写的注释
+server:
+  port: "18080"
+  gin_mode: release
+  request_log: false
+  trusted_proxies: []
+
+# 自定义键（结构体里没有）必须保留
+my_custom_key: hello
+
+log:
+  level: INFO
+  startup: true
+  console: true
+  dir: data/logs
+  max_file_size_mb: 5
+  max_age_days: 7
+  history_size: 50
+  sql_level: warn
+`
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadFrom(path)
+	if cfg.Log.SQLSlowMS != 600 {
+		t.Errorf("缺失项未按默认值生效: sql_slow_ms=%d", cfg.Log.SQLSlowMS)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	// 缺失项按注释补写
+	for _, want := range []string{
+		"# GORM 慢查询告警阈值（毫秒），0=默认 600；不想看慢查询告警请把 sql_level 设为 error",
+		"  sql_slow_ms: 600",
+		"# SQLite 数据库配置",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("缺失配置项未补写: %q\n---\n%s", want, text)
+		}
+	}
+	// 原有每一行都在，且末尾换行保持
+	for _, line := range strings.Split(strings.TrimRight(original, "\n"), "\n") {
+		if !strings.Contains(text, line) {
+			t.Errorf("原始行被改动或丢失: %q\n---\n%s", line, text)
+		}
+	}
+	if !strings.HasSuffix(text, "\n") {
+		t.Error("末尾换行被改动")
+	}
+	// 检测结果必须可见（WARN 列出补写的键）
+	warned := false
+	for _, entry := range logging.Recent(logging.LevelWarn) {
+		if entry.Pack == "config" && strings.Contains(entry.Message, "缺少") &&
+			strings.Contains(entry.Message, "log.sql_slow_ms") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Error("启动补写缺失配置项时未输出 WARN 提示")
+	}
+	// 幂等：再次加载不改动文件
+	config.LoadFrom(path)
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(second) != text {
+		t.Errorf("重复加载改动了文件:\n%s", string(second))
 	}
 }
 
@@ -179,5 +271,257 @@ func TestRuntimeUpdatePreservesComments(t *testing.T) {
 	}
 	if !strings.Contains(text, `port: "9090"`) {
 		t.Errorf("Update 写回的端口异常:\n%s", text)
+	}
+}
+
+// TestRuntimeUpdateWritesOnlyChangedLines 验证保存配置只改「值发生变化」的那一行：
+// 用户手写的注释、空行、自定义键、行内注释与键序都逐字节保留，缺失的架构键只做追加。
+func TestRuntimeUpdateWritesOnlyChangedLines(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	original := `# 我手写的文件头注释
+server:
+  port: "18080"          # 行内注释要保留
+  gin_mode: release
+  request_log: false
+  trusted_proxies: []
+
+# 自定义键（结构体里没有）必须保留
+my_custom_key: hello
+
+log:
+  level: INFO
+  startup: true
+  console: true
+  dir: data/logs
+  max_file_size_mb: 5
+  max_age_days: 7
+  history_size: 50
+  sql_level: warn
+`
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// LoadFrom 会在启动时补写缺失键（由 TestLoadFromFillsMissingKeys 覆盖）；
+	// 这里把文件复原为「缺键」状态，用于验证保存路径同样只做最小写入并补写缺失键
+	cfg := config.LoadFrom(path)
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := config.NewRuntime(cfg, path)
+	if err := rt.Update(func(c *config.Config) { c.Server.Port = "9090" }); err != nil {
+		t.Fatalf("保存配置失败: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+
+	// ① 只有 port 行被改写：取值已更新、行内注释保留（该行按标准格式重渲染，注释前间距归一化）
+	if !strings.Contains(text, `  port: "9090" # 行内注释要保留`) {
+		t.Errorf("port 行未按最小改动重写:\n%s", text)
+	}
+	if strings.Contains(text, "18080") {
+		t.Errorf("旧端口值不应残留:\n%s", text)
+	}
+	// ② 原有每一行（除被替换的 port 行）都原样保留
+	for _, line := range strings.Split(strings.TrimRight(original, "\n"), "\n") {
+		if strings.Contains(line, `port: "18080"`) {
+			continue
+		}
+		if !strings.Contains(text, line) {
+			t.Errorf("原始行被改动或丢失: %q\n---\n%s", line, text)
+		}
+	}
+	// ③ 缺失的架构键按注释补写（log.sql_slow_ms + 整段缺失的 database/bot/auth/warframe）
+	for _, want := range []string{
+		"# GORM 慢查询告警阈值（毫秒），0=默认 600；不想看慢查询告警请把 sql_level 设为 error",
+		"  sql_slow_ms: 600",
+		"# SQLite 数据库配置",
+		"# OneBot 连接配置",
+		"# Warframe 数据层配置",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("缺失键未补写: %q\n---\n%s", want, text)
+		}
+	}
+	// ④ 补写后仍是合法配置，且解析结果与内存中的配置一致
+	reloaded := config.LoadFrom(path)
+	if reloaded.Server.Port != "9090" {
+		t.Errorf("重新加载端口异常: %q", reloaded.Server.Port)
+	}
+	if reloaded.Log.SQLSlowMS != 600 {
+		t.Errorf("补写的 sql_slow_ms 未生效: %d", reloaded.Log.SQLSlowMS)
+	}
+	// ⑤ 用户原文件的开头、键序与末尾换行保持不变
+	if !strings.HasPrefix(text, "# 我手写的文件头注释\n") {
+		t.Errorf("文件头注释位置被改动:\n%s", text)
+	}
+	if !strings.HasSuffix(text, "\n") {
+		t.Errorf("文件末尾换行被改动:\n%q", text)
+	}
+	customIndex := strings.Index(text, "my_custom_key: hello")
+	logIndex := strings.Index(text, "\nlog:\n")
+	if customIndex < 0 || logIndex < 0 || customIndex > logIndex {
+		t.Errorf("自定义键位置被改动:\n%s", text)
+	}
+}
+
+// TestRuntimeUpdateRewritesFlowSection 验证文件里某一节被写成流式 {…} 时：
+// 只把这一节整体改写为块状（其余内容不动），并在其中补齐缺失键——避免因无法逐行补丁而保存失败。
+func TestRuntimeUpdateRewritesFlowSection(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	original := `# 顶部注释必须保留
+server:
+  port: "18080"
+log: {level: INFO, startup: true, console: true, dir: data/logs, max_file_size_mb: 5, max_age_days: 7, history_size: 50, sql_level: warn}
+`
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// 同上：加载后再把文件复原为含流式分节的旧内容，让 Update 处理这份漂移的文件
+	cfg := config.LoadFrom(path)
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := config.NewRuntime(cfg, path)
+	if err := rt.Update(func(c *config.Config) { c.Log.Level = "DEBUG" }); err != nil {
+		t.Fatalf("流式分节的保存不应失败: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "log: {") {
+		t.Errorf("流式分节未被改写为块状:\n%s", text)
+	}
+	if !strings.HasPrefix(text, "# 顶部注释必须保留\nserver:\n  port: \"18080\"\n") {
+		t.Errorf("流式分节之外的内容被改动:\n%s", text)
+	}
+	for _, want := range []string{"  level: DEBUG", "  sql_slow_ms: 600", "# GORM 慢查询告警阈值"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("流式分节未按预期重写（缺少 %q）:\n%s", want, text)
+		}
+	}
+	if reloaded := config.LoadFrom(path); reloaded.Log.Level != "DEBUG" || reloaded.Log.SQLSlowMS != 600 {
+		t.Errorf("重新加载异常: level=%q sql_slow_ms=%d", reloaded.Log.Level, reloaded.Log.SQLSlowMS)
+	}
+}
+
+// TestRuntimeUpdateWithEnvOverride 验证存在环境变量覆盖时保存仍然成功：
+// 补丁校验必须拿「文件派生值」比对，而不是「环境变量生效后的值」（文件里并没有 env 的值）。
+func TestRuntimeUpdateWithEnvOverride(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	// 先落一份完整默认配置（含 port: "8080"）
+	config.LoadFrom(path)
+	t.Setenv("APP_PORT", "19090")
+
+	cfg := config.LoadFrom(path)
+	if cfg.Server.Port != "19090" {
+		t.Fatalf("环境变量未生效: %q", cfg.Server.Port)
+	}
+	rt := config.NewRuntime(cfg, path)
+	if err := rt.Update(func(c *config.Config) { c.Log.Level = "DEBUG" }); err != nil {
+		t.Fatalf("存在环境变量覆盖时保存不应失败: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `port: "8080"`) {
+		t.Errorf("文件里的 YAML 值不应被环境变量值覆盖:\n%s", text)
+	}
+	if !strings.Contains(text, "level: DEBUG") {
+		t.Errorf("变更未写入:\n%s", text)
+	}
+	if rt.Config().Server.Port != "19090" {
+		t.Errorf("保存后生效配置应仍受环境变量覆盖: %q", rt.Config().Server.Port)
+	}
+	if reloaded := config.LoadFrom(path); reloaded.Log.Level != "DEBUG" {
+		t.Errorf("重新加载变更未生效: %q", reloaded.Log.Level)
+	}
+}
+
+// TestRuntimeUpdateDetectsInPlaceSliceEdit 验证回调原地修改切片元素时也会写回文件
+// （Update 需先复制切片，否则 before/after 共享底层数组导致差异被吞掉）。
+func TestRuntimeUpdateDetectsInPlaceSliceEdit(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	original := "server:\n  port: \"18080\"\n  trusted_proxies:\n    - \"1.1.1.1\"\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.LoadFrom(path)
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := config.NewRuntime(cfg, path)
+	if err := rt.Update(func(c *config.Config) { c.Server.TrustedProxies[0] = "2.2.2.2" }); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "2.2.2.2") {
+		t.Errorf("原地修改切片元素未被写回:\n%s", string(data))
+	}
+}
+
+// TestRuntimeUpdateKeepsFileMode 验证保存不会改变 config.yaml 的权限位
+// （原子写入用 CreateTemp 会默认 0600，需按原文件权限 Chmod；Windows 无 POSIX 权限位，断言天然成立）。
+func TestRuntimeUpdateKeepsFileMode(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	config.LoadFrom(path)
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := config.NewRuntime(config.LoadFrom(path), path)
+	if err := rt.Update(func(c *config.Config) { c.Log.Level = "DEBUG" }); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Errorf("保存后权限位被改变: %v → %v", before.Mode().Perm(), after.Mode().Perm())
+	}
+}
+
+// TestRuntimeUpdateKeepsFileWhenConfigBroken 验证配置文件无法解析时拒绝写入：
+// 保存接口报错（不静默整份重写），用户文件逐字节保留。
+func TestRuntimeUpdateKeepsFileWhenConfigBroken(t *testing.T) {
+	neutralizeConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	broken := []byte("server:\n  port: \"8080\"\n\t broken: [\n")
+	if err := os.WriteFile(path, broken, 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := config.NewRuntime(config.LoadFrom(path), path)
+	if err := rt.Update(func(c *config.Config) { c.Server.Port = "9090" }); err == nil {
+		t.Fatal("配置无法解析时应返回错误")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(broken) {
+		t.Errorf("解析失败时不应改写用户文件:\n%s", string(data))
 	}
 }
