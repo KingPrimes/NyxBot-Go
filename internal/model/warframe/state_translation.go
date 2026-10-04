@@ -30,7 +30,7 @@ func (record StateTranslation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		plain
 		Type string `json:"type"`
-	}{plain: aliased, Type: stateTypeOrdinalToName(record.Type)})
+	}{plain: aliased, Type: StateTypeOrdinalToName(record.Type)})
 }
 
 // UnmarshalJSON 接受 type 为枚举名（前端契约）或序数（防御），统一转 ORDINAL 入库。
@@ -52,7 +52,7 @@ func (record *StateTranslation) UnmarshalJSON(data []byte) error {
 
 	var typeName string
 	if err := json.Unmarshal(raw.Type, &typeName); err == nil {
-		record.Type = stateTypeNameToOrdinal(typeName)
+		record.Type = StateTypeNameToOrdinal(typeName)
 		return nil
 	}
 	var typeOrdinal int

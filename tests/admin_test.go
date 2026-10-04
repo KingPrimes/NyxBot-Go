@@ -38,7 +38,7 @@ func TestInitCreatesAdminCredentialsOnce(t *testing.T) {
 	_ = os.Remove(credPath) // 清除同进程内前序测试可能留下的文件，保证独立性
 	t.Cleanup(func() { _ = os.Remove(credPath) })
 
-	database.Init(filepath.Join(t.TempDir(), "test.db"), false)
+	database.Init(filepath.Join(t.TempDir(), "test.db"), false, "silent")
 	closeGlobalDB(t) // 立即关闭连接：第二次 Init 会覆盖全局 DB，拖延关闭会导致句柄泄漏
 
 	data, err := os.ReadFile(credPath)
@@ -53,7 +53,7 @@ func TestInitCreatesAdminCredentialsOnce(t *testing.T) {
 	if err := os.WriteFile(credPath, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	database.Init(filepath.Join(t.TempDir(), "test2.db"), false)
+	database.Init(filepath.Join(t.TempDir(), "test2.db"), false, "silent")
 	closeGlobalDB(t)
 
 	data, err = os.ReadFile(credPath)

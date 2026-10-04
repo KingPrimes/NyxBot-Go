@@ -3,17 +3,12 @@
 package onebot
 
 import (
-	"errors"
 	"strings"
 
 	zero "github.com/wdvxdr1123/ZeroBot"
-	"gorm.io/gorm"
 
-	"nyxbot-go/internal/database"
 	"nyxbot-go/internal/draw"
 	"nyxbot-go/internal/enum/nyxbot"
-	"nyxbot-go/internal/logging"
-	modelwarframe "nyxbot-go/internal/model/warframe"
 	"nyxbot-go/internal/warframe"
 )
 
@@ -85,23 +80,26 @@ func (registry *CommandRegistry) wfArbitrationEx(ctx *zero.Ctx, _ string) error 
 	return ReplyImage(ctx, draw.DrawArbitrations(dtos))
 }
 
-// wfRelics 处理「核桃/查核桃」：按名称查询遗物（纯本地 relics 表）并绘图。
-// 参数为换取指令前缀后剩余内容（遗物名称）。
+// wfRelics 处理「核桃/查核桃」：按遗物名或奖励物品名查询遗物（纯本地 relics 表）并绘图。
+// 对齐 Java RelicsPlugin：Forma 类遗物不支持查询，命中多条时全部出图。
+// 参数为换取指令前缀后剩余内容（遗物名称 / 物品名称）。
 func (registry *CommandRegistry) wfRelics(ctx *zero.Ctx, parameter string) error {
 	name := strings.TrimSpace(parameter)
 	if name == "" {
 		return ReplyText(ctx, "请带上要查询的遗物名称，如：核桃 无垢 后纪")
 	}
-	var relic modelwarframe.Relics
-	err := database.DB.Preload("RelicRewards").Where("name = ?", name).First(&relic).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ReplyText(ctx, "未找到该遗物，请确认名称（如：愚龙 后纪）")
-		}
-		logging.ErrorPack("onebot.command", "query relic %q failed: %v", name, err)
-		return ReplyText(ctx, "查询遗物数据失败，请稍后再试")
+	if strings.Contains(strings.ToLower(name), "forma") {
+		return ReplyText(ctx, "遗物查询不支持Forma类遗物")
 	}
-	return ReplyImage(ctx, draw.DrawRelics([]*draw.Relics{warframe.RelicsToDraw(&relic)}))
+	relics := warframe.FindRelicsByNameOrReward(name)
+	if len(relics) == 0 {
+		return ReplyText(ctx, "未找到该遗物，请确认名称（如：愚龙 后纪）")
+	}
+	dtos := make([]*draw.Relics, 0, len(relics))
+	for index := range relics {
+		dtos = append(dtos, warframe.RelicsToDraw(&relics[index]))
+	}
+	return ReplyImage(ctx, draw.DrawRelics(dtos))
 }
 
 // wfActiveMission 处理「裂隙/裂缝」：展示当前进行中的普通裂隙图。

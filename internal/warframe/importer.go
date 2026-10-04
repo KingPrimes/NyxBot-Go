@@ -320,9 +320,51 @@ func (importer *DataImporter) importEphemeras() error {
 	return batchSave(importer.db, records, false)
 }
 
+// ParseStateTranslationExport 解析单个官方导出文件为状态翻译记录
+// （对齐 Java StateTranslationService.parseFromExport）：
+// 中文导出文件（ExportXxx_zh.json）的名称字段是 name（Java 实体为 @JsonProperty("name")），
+// englishName 仅作为英文导出的兼容兜底；name 为空的条目按 Java 语义跳过（filter(!getName().isEmpty())）；
+// type 先按 StateTypeEnum.KEY 正则整串匹配 uniqueName，未命中回退 fallbackType（来源默认类型）。
+func ParseStateTranslationExport(raw []byte, key string, fallbackType int) []modelwarframe.StateTranslation {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil
+	}
+	listRaw, ok := envelope[key]
+	if !ok {
+		return nil
+	}
+	var entries []struct {
+		UniqueName  string          `json:"uniqueName"`
+		Name        string          `json:"name"`
+		EnglishName string          `json:"englishName"`
+		Description json.RawMessage `json:"description"`
+	}
+	if err := json.Unmarshal(listRaw, &entries); err != nil {
+		return nil
+	}
+	records := make([]modelwarframe.StateTranslation, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name
+		if name == "" {
+			name = entry.EnglishName
+		}
+		if entry.UniqueName == "" || name == "" {
+			continue
+		}
+		records = append(records, modelwarframe.StateTranslation{
+			UniqueName:  entry.UniqueName,
+			Name:        name,
+			Description: extractFirstDescription(entry.Description),
+			Type:        exportTypeOrdinal(entry.UniqueName, fallbackType),
+		})
+	}
+	return records
+}
+
 // ImportStateTranslation 从导出文件导入状态翻译（Phase 1）。
-// 对齐 Java StateTranslationService.initData：按 EXPORT_SOURCES 读取，
-// type 默认用来源默认值，CDN 源（state_translation.json）才按 uniqueName 正则匹配覆盖。
+// 对齐 Java StateTranslationService.initData：按 EXPORT_SOURCES 读取导出文件，
+// 再合并 CDN state_translation.json（CDN 条目按 uniqueName 正则匹配 StateTypeEnum.KEY，未匹配回退 RESOURCES）。
 func (importer *DataImporter) ImportStateTranslation(_ context.Context) error {
 	records := make([]modelwarframe.StateTranslation, 0, 2048)
 
@@ -331,34 +373,7 @@ func (importer *DataImporter) ImportStateTranslation(_ context.Context) error {
 		if err != nil || len(raw) == 0 {
 			continue
 		}
-		var envelope map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			continue
-		}
-		listRaw, ok := envelope[source.key]
-		if !ok {
-			continue
-		}
-		var entries []struct {
-			UniqueName  string          `json:"uniqueName"`
-			EnglishName string          `json:"englishName"`
-			Description json.RawMessage `json:"description"`
-		}
-		if err := json.Unmarshal(listRaw, &entries); err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.UniqueName == "" {
-				continue
-			}
-			description := extractFirstDescription(entry.Description)
-			records = append(records, modelwarframe.StateTranslation{
-				UniqueName:  entry.UniqueName,
-				Name:        entry.EnglishName,
-				Description: description,
-				Type:        source.state,
-			})
-		}
+		records = append(records, ParseStateTranslationExport(raw, source.key, source.state)...)
 	}
 
 	// CDN state_translation.json：按 uniqueName 正则匹配 StateTypeEnum.KEY 覆盖 type（未匹配回退 RESOURCES）。
@@ -379,7 +394,7 @@ func (importer *DataImporter) ImportStateTranslation(_ context.Context) error {
 					UniqueName:  entry.UniqueName,
 					Name:        entry.Name,
 					Description: extractFirstDescription(entry.Description),
-					Type:        stateTypeMatchOrdinal(entry.UniqueName, entry.Type, stateTypeNameToOrdinal()),
+					Type:        stateTypeMatchOrdinal(entry.UniqueName, entry.Type),
 					ParentName:  entry.ParentName,
 				})
 			}
@@ -389,92 +404,54 @@ func (importer *DataImporter) ImportStateTranslation(_ context.Context) error {
 	if len(records) == 0 {
 		return fmt.Errorf("no state translation records from export files")
 	}
-	return batchSave(importer.db, records, false)
-}
-
-// stateTypeNameToOrdinal 构建 StateType 枚举名 -> 序数映射（对齐 Java 枚举声明顺序）。
-func stateTypeNameToOrdinal() map[string]int {
-	result := make(map[string]int, len(stateTypeNames))
-	for index, name := range stateTypeNames {
-		result[name] = index
+	if err := batchSave(importer.db, records, false); err != nil {
+		return err
 	}
-	return result
-}
-
-// stateTypeNames StateTypeEnum 声明顺序（对齐 Java StateTypeEnum.java）。
-var stateTypeNames = []string{
-	"ALL", "GEAR", "KEYS", "RESOURCES", "SENTINELS", "OTHER", "MODS", "WARFRAMES",
-	"WEAPONS", "RELIC_BRONZE", "RELIC_PLATINUM", "RELIC_GOLD", "RELIC_SILVER",
-	"ENHANCERS", "SKINS", "SHIP", "TENNO_ACCESSORY_SCARVES", "WEAPONS_TENNO_MELEE_SKIN",
-	"KUBROW_PET_PATTERNS", "CATBROW_PET_PATTERNS", "INFESTED_KAVAT_PET_PATTERNS",
-	"INFESTED_PREDATORS_PET_PATTERNS", "BACKGROUNDS", "CURSORS", "SOUNDS",
-	"CUSTOM_UI_STYLE", "ACTION_FIGURE_DIORAMAS", "COLORS", "NOTE_PACkS", "POSE_SETS",
-	"QUARTERS_WALLPAPERS", "ARCADE", "EMOTES", "VIDEO_WALL_BACKDROPS",
-	"VIDEO_WALL_SOUNDSCAPES", "AVATAR_IMAGES", "SUIT_CUSTOMIZATIONS", "PACKAGES",
-	"SHIP_SCENES", "BLUEPRINT",
-}
-
-// stateTypeKeyPatterns StateType 正则（对齐 Java KEY 字段），用于 uniqueName 匹配。
-var stateTypeKeyPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^$`), // ALL
-	regexp.MustCompile(`^$`), // GEAR
-	regexp.MustCompile(`^$`), // KEYS
-	regexp.MustCompile(`^$`), // RESOURCES
-	regexp.MustCompile(`^$`), // SENTINELS
-	regexp.MustCompile(`^$`), // OTHER
-	regexp.MustCompile(`^$`), // MODS
-	regexp.MustCompile(`^$`), // WARFRAMES
-	regexp.MustCompile(`^$`), // WEAPONS
-	regexp.MustCompile(`/Lotus/Types/Game/Projections/.*?(Bronze)$`),
-	regexp.MustCompile(`/Lotus/Types/Game/Projections/.*?(Platinum)$`),
-	regexp.MustCompile(`/Lotus/Types/Game/Projections/.*?(Gold)$`),
-	regexp.MustCompile(`/Lotus/Types/Game/Projections/.*?(Silver)$`),
-	regexp.MustCompile(`/Lotus/Upgrades/CosmeticEnhancers/.*`),
-	regexp.MustCompile(`/Lotus/Upgrades/Skins/.*`),
-	regexp.MustCompile(`/Lotus/Types/Ship/.*`),
-	regexp.MustCompile(`/Lotus/Characters/Tenno/Accessory/Scarves/.*`),
-	regexp.MustCompile(`/Lotus/Weapons/Tenno/Melee/.*Skin`),
-	regexp.MustCompile(`/Lotus/Types/Game/KubrowPet/Patterns/.*`),
-	regexp.MustCompile(`/Lotus/Types/Game/CatbrowPet/Patterns/.*`),
-	regexp.MustCompile(`/Lotus/Types/Game/InfestedKavatPet/Patterns/.*`),
-	regexp.MustCompile(`/Lotus/Types/Game/InfestedPredatorPet/Patterns/.*`),
-	regexp.MustCompile(`/Lotus/Interface/Graphics/CustomUI/Backgrounds/.*`),
-	regexp.MustCompile(`/Lotus/Interface/Graphics/CustomUI/Cursors/.*`),
-	regexp.MustCompile(`/Lotus/Interface/Graphics/CustomUI/Sounds/.*`),
-	regexp.MustCompile(`/Lotus/Interface/Graphics/CustomUI/.*Style`),
-	regexp.MustCompile(`/Lotus/Types/Game/ActionFigureDioramas/.*`),
-	regexp.MustCompile(`/Lotus/Types/Game/(.*)/?Colors/.*`),
-	regexp.MustCompile(`/Lotus/Types/Game/NotePacks/.*`),
-	regexp.MustCompile(`/Lotus/Types/Game/PoseSets/.*`),
-	regexp.MustCompile(`/Lotus/Types/Game/QuartersWallpapers/.*`),
-	regexp.MustCompile(`/Lotus/Types/Items/Arcade/.*`),
-	regexp.MustCompile(`/Lotus/Types/Items/Emotes/.*`),
-	regexp.MustCompile(`/Lotus/Types/Items/VideoWallBackdrops/.*`),
-	regexp.MustCompile(`/Lotus/Types/Items/VideoWallSoundscapes/.*`),
-	regexp.MustCompile(`/Lotus/Types/StoreItems/AvatarImages/.*`),
-	regexp.MustCompile(`/Lotus/Types/StoreItems/SuitCustomizations/.*`),
-	regexp.MustCompile(`/Lotus/Types/StoreItems/Packages/.*`),
-	regexp.MustCompile(`/Lotus/Types/StoreItems/ShipScenes/.*`),
-	regexp.MustCompile(`/Lotus/.*Blueprint`),
-}
-
-// stateTypeMatchOrdinal 确定 CDN 翻译条目的 type 序数：JSON 自带 type（枚举名）优先，
-// 否则按 uniqueName 正则匹配 StateTypeEnum.KEY，仍未匹配回退 RESOURCES(3)。
-func stateTypeMatchOrdinal(uniqueName string, rawType json.RawMessage, nameToOrdinal map[string]int) int {
-	if len(rawType) > 0 && string(rawType) != "null" {
-		var typeName string
-		if err := json.Unmarshal(rawType, &typeName); err == nil && typeName != "" {
-			if ordinal, ok := nameToOrdinal[typeName]; ok {
-				return ordinal
-			}
-		}
+	// 清理历史空名行：旧实现读错了字段（englishName）导致大量 name 为空的记录入库，
+	// 空名记录无翻译价值（Java 侧 @NotEmpty 且导入时已过滤），此处一并清掉。
+	if err := importer.db.Exec("DELETE FROM state_translation WHERE name IS NULL OR TRIM(name) = ''").Error; err != nil {
+		logging.WarnPack("warframe.import", "clean empty state translation failed: %v", err)
 	}
+	return nil
+}
+
+// stateTypeKeyPatterns StateType 正则（从 modelwarframe.StateTypes 编译，下标即枚举 ORDINAL）。
+// Java 用 String.matches() 整串匹配语义，故统一锚定为 ^(?:...)$；空 KEY 编译为 ^(?:)$，永不出现在真实数据上。
+var stateTypeKeyPatterns = compileStateTypePatterns()
+
+// compileStateTypePatterns 把 StateTypes 表的 KEY 源串编译为整串匹配正则（对齐 Java String.matches）。
+func compileStateTypePatterns() []*regexp.Regexp {
+	patterns := make([]*regexp.Regexp, 0, len(modelwarframe.StateTypes))
+	for _, definition := range modelwarframe.StateTypes {
+		patterns = append(patterns, regexp.MustCompile("^(?:"+definition.Key+")$"))
+	}
+	return patterns
+}
+
+// exportTypeOrdinal 确定导出文件条目的 StateType 序数（对齐 Java StateTranslationService.parseFromExport）：
+// 先按 StateTypeEnum.KEY 正则整串匹配 uniqueName，未命中回退来源默认类型 fallback
+// （fallback 即 exportSources 表中对应来源的 type）。
+func exportTypeOrdinal(uniqueName string, fallback int) int {
 	for index, pattern := range stateTypeKeyPatterns {
 		if pattern.MatchString(uniqueName) {
 			return index
 		}
 	}
-	return nameToOrdinal["RESOURCES"]
+	return fallback
+}
+
+// stateTypeMatchOrdinal 确定 CDN 翻译条目的 type 序数：JSON 自带 type（枚举名）优先，
+// 否则按 uniqueName 正则匹配 StateTypeEnum.KEY，仍未匹配回退 RESOURCES。
+func stateTypeMatchOrdinal(uniqueName string, rawType json.RawMessage) int {
+	if len(rawType) > 0 && string(rawType) != "null" {
+		var typeName string
+		if err := json.Unmarshal(rawType, &typeName); err == nil && typeName != "" {
+			if ordinal, ok := modelwarframe.StateTypeOrdinal(typeName); ok {
+				return ordinal
+			}
+		}
+	}
+	return exportTypeOrdinal(uniqueName, modelwarframe.StateTypeNameToOrdinal("RESOURCES"))
 }
 
 // extractFirstDescription description 字段可能为数组或字符串，取首个字符串（对齐 Java）。
@@ -840,18 +817,51 @@ func (importer *DataImporter) ImportWarframes(_ context.Context) error {
 			Abilities:       abilities,
 		})
 	}
-	return batchSave(importer.db, records, true)
+	// 技能子表完全由导出文件派生：先校正主键结构（DDL 独立于事务），再在同一事务里清空 + 整体写入
+	// （对齐 Java @OneToMany(orphanRemoval = true)，避免旧行残留与旧单列主键结构阻止写入；
+	// 写入失败时回滚删除，避免技能数据被清空后无法恢复）。
+	if err := importer.ensureAbilitiesSchema(); err != nil {
+		return err
+	}
+	return importer.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).
+			Delete(&modelwarframe.WarframesAbility{}).Error; err != nil {
+			return fmt.Errorf("clear warframe abilities: %w", err)
+		}
+		return batchSave(tx, records, true)
+	})
 }
 
-// ImportRelics 从 ExportRelicArcane 导入遗物（按 name 去重 + 翻译奖励名）。
-func (importer *DataImporter) ImportRelics(_ context.Context) error {
-	raw, err := importer.exporter.ReadExportFile("ExportRelicArcane")
-	if err != nil || len(raw) == 0 {
-		return fmt.Errorf("ExportRelicArcane file unavailable")
+// ensureAbilitiesSchema 校验 abilities 表的主键结构：
+// 旧库按 Java 实体的单列主键（ability_unique_name）建立，无法保存基础版/Prime 共用的技能行，
+// 检测到旧结构时重建子表（子表完全由导出文件派生，重建无数据损失）。
+func (importer *DataImporter) ensureAbilitiesSchema() error {
+	var primaryKeys int64
+	if err := importer.db.Raw("SELECT COUNT(*) FROM pragma_table_info('abilities') WHERE pk > 0").
+		Scan(&primaryKeys).Error; err != nil {
+		return fmt.Errorf("inspect abilities primary key: %w", err)
 	}
+	// primaryKeys == 0 覆盖两种情况：表尚未创建（pragma_table_info 对不存在的表返回 0 行而非报错）
+	// 与旧的单列主键结构——两者都按新结构重建，DROP 对不存在的表是空操作。
+	if primaryKeys >= 2 {
+		return nil
+	}
+	if err := importer.db.Migrator().DropTable(&modelwarframe.WarframesAbility{}); err != nil {
+		return fmt.Errorf("rebuild abilities table: %w", err)
+	}
+	return importer.db.AutoMigrate(&modelwarframe.WarframesAbility{})
+}
+
+// ParseRelicExport 解析 ExportRelicArcane 导出文件（对齐 Java RelicsImportUtil.readRelicsFromFile +
+// 按 name 去重 + filterSecretRelics）。奖励行主键取
+// "{遗物uniqueName}|{奖励原始uniqueName}|{稀有度}|{等级}|{数量}"：
+// 导出文件不含奖励 id，且同一奖励物品会被多个遗物共用，用奖励物品名当主键会造成跨遗物互相覆盖
+// （Java 侧是 @GeneratedValue(UUID)，每个遗物各自成行）。奖励名此处保留原始 uniqueName，
+// 由 TranslateRelicRewardNames 翻译。
+func ParseRelicExport(raw []byte) ([]modelwarframe.Relics, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return err
+		return nil, err
 	}
 	var entries []struct {
 		UniqueName  string `json:"uniqueName"`
@@ -859,7 +869,6 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 		CodexSecret bool   `json:"codexSecret"`
 		Description string `json:"description"`
 		Rewards     []struct {
-			ID         string `json:"id"`
 			RewardName string `json:"rewardName"`
 			Rarity     string `json:"rarity"` // 枚举名（如 "COMMON"），入库转 ORDINAL
 			Tier       int    `json:"tier"`
@@ -867,7 +876,7 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 		} `json:"relicRewards"`
 	}
 	if err := json.Unmarshal(envelope["ExportRelicArcane"], &entries); err != nil {
-		return err
+		return nil, err
 	}
 
 	// 按 name 去重（保留首个）并过滤 codexSecret
@@ -880,12 +889,13 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 		seen[entry.Name] = true
 		rewards := make([]modelwarframe.RelicRewards, 0, len(entry.Rewards))
 		for _, reward := range entry.Rewards {
-			id := reward.ID
-			if id == "" {
-				id = reward.RewardName
+			if reward.RewardName == "" {
+				continue
 			}
 			rewards = append(rewards, modelwarframe.RelicRewards{
-				ID:         id,
+				// 确定性主键：遗物 + 奖励 uniqueName + 稀有度/等级/数量（理由见 ParseRelicExport 注释）
+				ID: fmt.Sprintf("%s|%s|%s|%d|%d",
+					entry.UniqueName, reward.RewardName, reward.Rarity, reward.Tier, reward.ItemCount),
 				RelicsID:   entry.UniqueName,
 				RewardName: reward.RewardName,
 				Rarity:     rarityNameToOrdinal(reward.Rarity),
@@ -901,7 +911,78 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 			RelicRewards: rewards,
 		})
 	}
-	return batchSave(importer.db, records, true)
+	return records, nil
+}
+
+// TranslateRelicRewardNames 把遗物奖励名翻译为中文（对齐 Java RelicsImportUtil.loadTranslationMap +
+// translateReward）：关键词取奖励 uniqueName 的末三段（StringUtils.getLastThreeSegments）并去重，
+// 一次性批量查询 state_translation（对齐 Java 的 OR LIKE 规格查询，避免逐条 4000+ 次单查），
+// 未命中保留原始路径并计入返回值（Java 侧会导出未翻译清单）。
+func TranslateRelicRewardNames(relics []modelwarframe.Relics) []string {
+	keywords := make([]string, 0, 1024)
+	seen := make(map[string]bool, 1024)
+	for index := range relics {
+		for reward := range relics[index].RelicRewards {
+			key := getLastThreeSegments(relics[index].RelicRewards[reward].RewardName)
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			keywords = append(keywords, key)
+		}
+	}
+	translations := LoadStateTranslationMap(keywords)
+
+	untranslated := make([]string, 0)
+	for index := range relics {
+		for reward := range relics[index].RelicRewards {
+			raw := relics[index].RelicRewards[reward].RewardName
+			name := translations[getLastThreeSegments(raw)]
+			if name == "" {
+				untranslated = append(untranslated, raw)
+				continue
+			}
+			relics[index].RelicRewards[reward].RewardName = name
+		}
+	}
+	return untranslated
+}
+
+// ImportRelics 从 ExportRelicArcane 导入遗物
+// （对齐 Java RelicsImportUtil.importRelicsData：解析 → 过滤机密 → 按 name 去重 → 翻译奖励名 → 落库）。
+// 落库前清空 relic_rewards：子表完全由该导出文件派生，对齐 Java @OneToMany(orphanRemoval = true) 语义，
+// 同时清掉旧主键方案（直接用奖励物品名当 id）留下的脏数据。
+// 清空与写入放在同一事务：写入失败时回滚删除，避免奖励数据被清空后无法恢复。
+func (importer *DataImporter) ImportRelics(_ context.Context) error {
+	raw, err := importer.exporter.ReadExportFile("ExportRelicArcane")
+	if err != nil || len(raw) == 0 {
+		return fmt.Errorf("ExportRelicArcane file unavailable")
+	}
+	records, err := ParseRelicExport(raw)
+	if err != nil {
+		return err
+	}
+	if len(records) == 0 {
+		return fmt.Errorf("no relic records in ExportRelicArcane")
+	}
+	untranslated := TranslateRelicRewardNames(records)
+	if err := importer.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).
+			Delete(&modelwarframe.RelicRewards{}).Error; err != nil {
+			return fmt.Errorf("clear relic rewards: %w", err)
+		}
+		return batchSave(tx, records, true)
+	}); err != nil {
+		return err
+	}
+	rewardCount := 0
+	for _, record := range records {
+		rewardCount += len(record.RelicRewards)
+	}
+	logging.InfoPack("warframe.import",
+		"relics imported: %d relics, %d rewards, %d reward names untranslated",
+		len(records), rewardCount, len(untranslated))
+	return nil
 }
 
 // ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 运行时替换）。
@@ -1249,9 +1330,9 @@ func httpGetBytes(url string) ([]byte, error) {
 	return doRequestWithRetry(context.Background(), client, http.MethodGet, url, nil)
 }
 
-// init 校验 package 级一致性。
+// init 校验 package 级一致性：正则表必须与 StateTypes 表逐项对应（下标即 ORDINAL）。
 func init() {
-	if len(stateTypeKeyPatterns) != len(stateTypeNames) {
+	if len(stateTypeKeyPatterns) != len(modelwarframe.StateTypes) {
 		panic("state type patterns count mismatch")
 	}
 }

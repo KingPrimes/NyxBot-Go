@@ -26,13 +26,15 @@ func (Warframes) TableName() string {
 	return "warframes"
 }
 
-// WarframesAbility 战甲技能条目。abilityUniqueName 为字符串主键。
+// WarframesAbility 战甲技能条目。(warframeUniqueName, abilityUniqueName) 联合主键：
+// 官方导出数据中基础版与 Prime 版共用同一技能 uniqueName（如 Volt / Volt Prime、各 Archwing），
+// 若用单列主键，后写入的战甲会把技能行「抢走」，导致前一个战甲技能列表为空。
 // JSON 字段对齐前端 abilities 子表（abilityName / description）。
 type WarframesAbility struct {
-	AbilityUniqueName  string `gorm:"primaryKey" json:"abilityUniqueName"`             // 主键（唯一标识）
+	AbilityUniqueName  string `gorm:"primaryKey" json:"abilityUniqueName"`             // 技能唯一标识
 	AbilityName        string `gorm:"column:ability_name" json:"abilityName"`          // 技能名称
 	Description        string `gorm:"column:description;type:text" json:"description"` // 技能描述
-	WarframeUniqueName string `gorm:"column:warframe_unique_name" json:"-"`            // 所属战甲外键（不输出）
+	WarframeUniqueName string `gorm:"column:warframe_unique_name;primaryKey" json:"-"` // 所属战甲外键（不输出，联合主键的一部分）
 }
 
 func (WarframesAbility) TableName() string {

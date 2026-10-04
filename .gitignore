@@ -1,4 +1,7 @@
 .env
+.agents
+.claude
+.playwright
 .idea/
 .vscode/
 *.exe
@@ -7,6 +10,7 @@
 /tmp/
 /dist/
 /data/
+/resources/templates
 /resources/static/*
 !/resources/static/.gitkeep
 admin-credentials.txt

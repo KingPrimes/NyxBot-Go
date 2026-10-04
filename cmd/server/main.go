@@ -51,7 +51,7 @@ func main() {
 		ConsoleEnabled: cfg.Log.Console,
 		Level:          cfg.Log.Level,
 	})
-	database.Init(cfg.Database.Path, cfg.Log.Startup)
+	database.Init(cfg.Database.Path, cfg.Log.Startup, cfg.Log.SQLLevel)
 
 	serverContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -110,5 +110,48 @@ func main() {
 	}()
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logging.ErrorPack("main", "server stopped: %v", err)
+		if hint := listenFailureHint(httpServer.Addr, err); hint != "" {
+			logging.ErrorPack("main", "%s", hint)
+		}
 	}
+}
+
+// Windows 套接字错误码：Go 在 Windows 上不会把它们映射成 syscall.EACCES/EADDRINUSE，
+// 只能按原始码判断（实测 errors.Is(err, syscall.EACCES) 对 WSAEACCES 为 false）。
+const (
+	wsaEACCES     = 10013 // WSAEACCES：绑定被系统拒绝（例如端口落在保留段内）
+	wsaEADDRINUSE = 10048 // WSAEADDRINUSE：端口已被其它进程占用
+)
+
+// listenFailureHint 针对监听失败的常见原因返回一行排障提示（端口被系统保留 / 端口被占用），
+// 同时覆盖 Windows（WSAEACCES/WSAEADDRINUSE）与类 Unix（EACCES/EADDRINUSE）取值；无匹配返回空串。
+func listenFailureHint(addr string, err error) string {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return ""
+	}
+	switch {
+	case int(errno) == wsaEACCES:
+		return fmt.Sprintf("hint: %s bind denied (WSAEACCES/10013); the port is likely inside a Windows reserved range "+
+			"(Hyper-V/WSL/Docker winnat). Check `netsh interface ipv4 show excludedportrange protocol=tcp`, "+
+			"then change server.port in config.yaml, or run `net stop winnat` before starting the server", addr)
+	case int(errno) == wsaEADDRINUSE:
+		return fmt.Sprintf("hint: %s address already in use (WSAEADDRINUSE/10048); find the owner with "+
+			"`netstat -ano | findstr :%s`, or change server.port in config.yaml", addr, portOfAddr(addr))
+	case errors.Is(err, syscall.EACCES):
+		return fmt.Sprintf("hint: %s bind denied (EACCES); on Unix this is usually a privileged port (<1024) "+
+			"or a port reserved by policy", addr)
+	case errors.Is(err, syscall.EADDRINUSE):
+		return fmt.Sprintf("hint: %s address already in use (EADDRINUSE); find the owner with `lsof -i :%s`, "+
+			"or change server.port in config.yaml", addr, portOfAddr(addr))
+	}
+	return ""
+}
+
+// portOfAddr 从监听地址中取端口部分（"0.0.0.0:18080" -> "18080"），解析不出时原样返回。
+func portOfAddr(addr string) string {
+	if index := strings.LastIndex(addr, ":"); index >= 0 && index < len(addr)-1 {
+		return addr[index+1:]
+	}
+	return addr
 }

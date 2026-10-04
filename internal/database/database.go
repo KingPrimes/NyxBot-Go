@@ -9,7 +9,6 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"nyxbot-go/internal/logging"
 	"nyxbot-go/internal/model/bot"
@@ -22,7 +21,9 @@ import (
 var DB *gorm.DB
 
 // Init 初始化 SQLite 数据库连接，执行自动迁移和默认管理员创建。
-func Init(dbPath string, startupLog bool) {
+// sqlLogLevel 控制 GORM SQL 日志级别（对应 config.yaml 的 log.sql_level）：
+// silent / error / warn / info，大小写不敏感；空值或非法值回退 warn（只记录错误与慢查询）。
+func Init(dbPath string, startupLog bool, sqlLogLevel string) {
 	if dbPath == "" {
 		dbPath = "data/nyxbot.db"
 	}
@@ -34,7 +35,9 @@ func Init(dbPath string, startupLog bool) {
 	}
 
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		// 统一走 internal/logging（pack=database.sql）；
+		// 「记录不存在」是大量可选查询的预期结果，不再按 ERROR 输出。
+		Logger: NewGORMLogger(ParseSQLLogLevel(sqlLogLevel), gormSlowThreshold, true),
 	})
 	if err != nil {
 		logging.ErrorPack("database", "failed to connect database: %v", err)
