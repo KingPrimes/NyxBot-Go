@@ -32,7 +32,7 @@ type wsCycleEnvelope struct {
 // （本批次仅用到标签与结束时间；Nodes/Jobs 由三赏金批次解析）。
 type wsSyndicateMission struct {
 	Tag    string `json:"Tag"`
-	Expiry string `json:"Expiry"`
+	Expiry wsTime `json:"Expiry"`
 }
 
 // GetAllCycle 组装五张平原周期卡片（对齐 Java WorldStateUtils.getAllCycle）。
@@ -69,7 +69,7 @@ func syndicateBountyExpiry(tag string) int64 {
 		if mission.Tag != tag {
 			continue
 		}
-		if expiry := parseTime(mission.Expiry); !expiry.IsZero() {
+		if expiry := mission.Expiry.Time(); !expiry.IsZero() {
 			return expiry.UnixMilli()
 		}
 	}

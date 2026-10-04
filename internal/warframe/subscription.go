@@ -440,9 +440,12 @@ func UserSubscriptionInfo(groupID, userID int64) string {
 	}
 	boundary := "━━━━━━━━━━━━━━━━━━"
 	var sb strings.Builder
-	sb.WriteString("当前订阅：\n" + boundary + "\n")
+	sb.WriteString("当前订阅：\n")
+	sb.WriteString(boundary)
+	sb.WriteString("\n")
 	for i := range rules {
-		sb.WriteString(formatCheckTypeLine(&rules[i]) + "\n")
+		sb.WriteString(formatCheckTypeLine(&rules[i]))
+		sb.WriteString("\n")
 	}
 	sb.WriteString(boundary)
 	return sb.String()
@@ -537,16 +540,21 @@ func ruleMatchesUnsubscribe(rule *modelwarframe.MissionSubscribeUserCheckType, s
 // formatCheckTypeLine 格式化单条订阅（对齐 Java formatCheckTypeLine）。
 func formatCheckTypeLine(rule *modelwarframe.MissionSubscribeUserCheckType) string {
 	var sb strings.Builder
-	sb.WriteString("[" + strconv.Itoa(ordinalOfSubscribe(nyxbot.SubscribeType(rule.Subscribe))) + "] ")
+	sb.WriteString("[")
+	sb.WriteString(strconv.Itoa(ordinalOfSubscribe(nyxbot.SubscribeType(rule.Subscribe))))
+	sb.WriteString("] ")
 	sb.WriteString(subscribeName(nyxbot.SubscribeType(rule.Subscribe)))
 	if rule.MissionTypeEnum != "" {
-		sb.WriteString(" - " + missionName(nyxbot.MissionType(rule.MissionTypeEnum)))
+		sb.WriteString(" - ")
+		sb.WriteString(missionName(nyxbot.MissionType(rule.MissionTypeEnum)))
 	}
 	if rule.TierNum != 0 {
-		sb.WriteString(" - " + tierName(rule.TierNum))
+		sb.WriteString(" - ")
+		sb.WriteString(tierName(rule.TierNum))
 	}
 	if rule.InvasionReward != "" && rule.InvasionReward != string(nyxbot.InvRewardNone) {
-		sb.WriteString(" - " + invasionRewardName(nyxbot.InvasionReward(rule.InvasionReward)))
+		sb.WriteString(" - ")
+		sb.WriteString(invasionRewardName(nyxbot.InvasionReward(rule.InvasionReward)))
 	}
 	return sb.String()
 }
@@ -565,19 +573,24 @@ func ordinalOfSubscribe(c nyxbot.SubscribeType) int {
 func buildSubscriptionInfo(cmd *SubscribeCommand) string {
 	boundary := "━━━━━━━━━━━━━━━━━━"
 	var sb strings.Builder
-	sb.WriteString(boundary + "\n")
-	sb.WriteString("类型: " + subscribeName(cmd.SubType))
+	sb.WriteString(boundary)
+	sb.WriteString("\n")
+	sb.WriteString("类型: ")
+	sb.WriteString(subscribeName(cmd.SubType))
 	if cmd.Mission != nil {
-		sb.WriteString("\n任务: " + missionName(*cmd.Mission))
+		sb.WriteString("\n任务: ")
+		sb.WriteString(missionName(*cmd.Mission))
 	} else {
 		sb.WriteString("\n任务: 全部")
 	}
 	if cmd.Tier != nil {
-		sb.WriteString("\n等级: " + tierName(*cmd.Tier))
+		sb.WriteString("\n等级: ")
+		sb.WriteString(tierName(*cmd.Tier))
 	} else if cmd.SubType == nyxbot.SubFissures {
 		sb.WriteString("\n等级: 全部")
 	}
-	sb.WriteString("\n" + boundary)
+	sb.WriteString("\n")
+	sb.WriteString(boundary)
 	return sb.String()
 }
 

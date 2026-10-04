@@ -1,7 +1,9 @@
 // 世界状态查询：解析 Raw WorldState JSON（对齐 Java WorldStateUtils.getFissure /
 // WarframeCache.getWarframeStatus），并将数据转换为 draw 绘图 DTO。
-// 注意：真实 WorldState API 的 activeMissions 数组字段为 Java 命名风格（大写首字母），
-// 与 model.WorldState（NoManifest 用途）不同，故此处自定义 envelope。
+// 注意：官方载荷是 **MongoDB 扩展 JSON**（_id 为 {"$oid":...}、时间为 {"$date":{"$numberLong":...}}），
+// 且顶层数组键名与 Java 侧一致为首字母大写（ActiveMissions / VoidStorms / Invasions / ...）。
+// 这里不复用 model.WorldState（那是 warframestat 风格的简化模型），而是按需自定义 envelope，
+// 并用 wsObjectID / wsTime / wsRewardList 三个容错类型解码，见 worldstate_json.go。
 package warframe
 
 import (
@@ -26,54 +28,58 @@ var (
 )
 
 // wsEnvelope 对齐 Java WorldState 顶层 JSON 字段（仅声明本批次用到的数组）。
+// 键名与官方载荷一致（首字母大写），见 draw-image-plugin 的 model.WorldState。
 type wsEnvelope struct {
-	ActiveMissions []wsActiveMission `json:"activeMissions"`
-	VoidStorms     []wsVoidStorm     `json:"voidStorms"`
-	Invasions      []wsInvasion      `json:"invasions"`
+	ActiveMissions []wsActiveMission `json:"ActiveMissions"`
+	VoidStorms     []wsVoidStorm     `json:"VoidStorms"`
+	Invasions      []wsInvasion      `json:"Invasions"`
 	VoidTraders    []wsVoidTrader    `json:"VoidTraders"`
 	DailyDeals     []wsDailyDeal     `json:"DailyDeals"`
 	Sorties        []wsSortie        `json:"Sorties"`
 }
 
 // wsActiveMission 对齐 Java model.ActiveMission（继承 BastWorldState）的 JSON 字段。
+// 注：官方载荷中 Faction 通常缺失（由 nodes 表推导）、Hard 仅钢铁模式才出现。
 type wsActiveMission struct {
-	ID          string `json:"_id"`
-	Activation  string `json:"Activation"`
-	Expiry      string `json:"Expiry"`
-	MissionType string `json:"MissionType"`
-	Modifier    string `json:"Modifier"`
-	Node        string `json:"Node"`
-	Faction     string `json:"Faction"`
-	Region      int    `json:"Region"`
-	Seed        int    `json:"Seed"`
-	Hard        bool   `json:"Hard"`
-	VoidStorms  bool   `json:"voidStorms"`
+	ID          wsObjectID `json:"_id"`
+	Activation  wsTime     `json:"Activation"`
+	Expiry      wsTime     `json:"Expiry"`
+	MissionType string     `json:"MissionType"`
+	Modifier    string     `json:"Modifier"`
+	Node        string     `json:"Node"`
+	Faction     string     `json:"Faction"`
+	Region      int        `json:"Region"`
+	Seed        int        `json:"Seed"`
+	Hard        bool       `json:"Hard"`
+	VoidStorms  bool       `json:"voidStorms"`
 }
 
-// wsVoidStorm 对齐 Java WorldState.voidStorms 数组元素（九重天数据源）。
+// wsVoidStorm 对齐 Java model.worldstate.VoidStorms 的 JSON 字段（九重天数据源）。
+// 遗物等级在官方载荷中的键名是 ActiveMissionTier（Java 侧字段名为 Tier）。
 type wsVoidStorm struct {
-	ID         string `json:"_id"`
-	Activation string `json:"Activation"`
-	Expiry     string `json:"Expiry"`
-	Node       string `json:"Node"`
-	Tier       string `json:"Tier"`
+	ID         wsObjectID `json:"_id"`
+	Activation wsTime     `json:"Activation"`
+	Expiry     wsTime     `json:"Expiry"`
+	Node       string     `json:"Node"`
+	Tier       string     `json:"ActiveMissionTier"`
 }
 
 // wsInvasion 对齐 Java model.worldstate.Invasion 的 JSON 字段。
+// 注：官方载荷中 Invasions 元素没有 Expiry，AttackerReward 是单个对象而非数组。
 type wsInvasion struct {
-	ID              string     `json:"_id"`
-	Activation      string     `json:"Activation"`
-	Expiry          string     `json:"Expiry"`
-	Faction         string     `json:"Faction"`
-	DefenderFaction string     `json:"DefenderFaction"`
-	Node            string     `json:"Node"`
-	Count           float64    `json:"Count"`
-	Goal            float64    `json:"Goal"`
-	LocTag          string     `json:"LocTag"`
-	Completed       bool       `json:"Completed"`
-	ChainID         string     `json:"ChainID"`
-	AttackerReward  []wsReward `json:"AttackerReward"`
-	DefenderReward  wsReward   `json:"DefenderReward"`
+	ID              wsObjectID   `json:"_id"`
+	Activation      wsTime       `json:"Activation"`
+	Expiry          wsTime       `json:"Expiry"`
+	Faction         string       `json:"Faction"`
+	DefenderFaction string       `json:"DefenderFaction"`
+	Node            string       `json:"Node"`
+	Count           float64      `json:"Count"`
+	Goal            float64      `json:"Goal"`
+	LocTag          string       `json:"LocTag"`
+	Completed       bool         `json:"Completed"`
+	ChainID         wsObjectID   `json:"ChainID"`
+	AttackerReward  wsRewardList `json:"AttackerReward"`
+	DefenderReward  wsReward     `json:"DefenderReward"`
 }
 
 // wsReward 对齐 Java model.worldstate.Reward 的 JSON 字段。
@@ -92,9 +98,9 @@ type wsRewardItem struct {
 
 // wsVoidTrader 对齐 Java model.worldstate.VoidTrader 的 JSON 字段。
 type wsVoidTrader struct {
-	ID         string       `json:"_id"`
-	Activation string       `json:"Activation"`
-	Expiry     string       `json:"Expiry"`
+	ID         wsObjectID   `json:"_id"`
+	Activation wsTime       `json:"Activation"`
+	Expiry     wsTime       `json:"Expiry"`
 	Character  string       `json:"Character"`
 	Node       string       `json:"Node"`
 	Manifest   []wsManifest `json:"Manifest"`
@@ -111,8 +117,8 @@ type wsManifest struct {
 // wsDailyDeal 对齐 Java model.worldstate.DailyDeals 的 JSON 字段。
 type wsDailyDeal struct {
 	Item          string   `json:"StoreItem"`
-	Activation    string   `json:"Activation"`
-	Expiry        string   `json:"Expiry"`
+	Activation    wsTime   `json:"Activation"`
+	Expiry        wsTime   `json:"Expiry"`
 	Discount      *float64 `json:"Discount"`
 	OriginalPrice *int     `json:"OriginalPrice"`
 	SalePrice     *int     `json:"SalePrice"`
@@ -122,9 +128,9 @@ type wsDailyDeal struct {
 
 // wsSortie 对齐 Java model.worldstate.Sortie 的 JSON 字段。
 type wsSortie struct {
-	ID         string            `json:"_id"`
-	Activation string            `json:"Activation"`
-	Expiry     string            `json:"Expiry"`
+	ID         wsObjectID        `json:"_id"`
+	Activation wsTime            `json:"Activation"`
+	Expiry     wsTime            `json:"Expiry"`
 	Boss       string            `json:"Boss"`
 	Variants   []wsSortieVariant `json:"Variants"`
 }
@@ -189,9 +195,9 @@ func GetInvasions() ([]*draw.Invasion, error) {
 // translateInvasion 翻译节点与奖励物品名（对齐 Java translateInvasion）。
 func translateInvasion(m *wsInvasion) *draw.Invasion {
 	act := &draw.Invasion{
-		ID:              m.ID,
-		Activation:      parseTime(m.Activation),
-		Expiry:          parseTime(m.Expiry),
+		ID:              m.ID.String(),
+		Activation:      m.Activation.Time(),
+		Expiry:          m.Expiry.Time(),
 		Faction:         drawplugin.Faction(m.Faction),
 		DefenderFaction: drawplugin.Faction(m.DefenderFaction),
 		Node:            TranslateNode(m.Node),
@@ -199,7 +205,7 @@ func translateInvasion(m *wsInvasion) *draw.Invasion {
 		Goal:            float64Ptr(m.Goal),
 		LocTag:          m.LocTag,
 		Completed:       m.Completed,
-		ChainID:         m.ChainID,
+		ChainID:         m.ChainID.String(),
 		DefenderReward:  translateReward(&m.DefenderReward),
 	}
 	for i := range m.AttackerReward {
@@ -248,10 +254,10 @@ func GetVoidTraders() ([]*draw.VoidTrader, error) {
 // translateVoidTrader 翻译虚空商人节点与商品名（对齐 Java translateVoidTraders）。
 func translateVoidTrader(v *wsVoidTrader) *draw.VoidTrader {
 	act := &draw.VoidTrader{
-		ID:        v.ID,
+		ID:        v.ID.String(),
 		Character: v.Character,
 		Node:      TranslateNode(v.Node),
-		Expiry:    parseTime(v.Expiry),
+		Expiry:    v.Expiry.Time(),
 	}
 	for i := range v.Manifest {
 		item := &draw.VoidTraderItem{
@@ -288,7 +294,7 @@ func translateDailyDeal(d *wsDailyDeal) *draw.DailyDeals {
 		Count:         d.Discount,
 		Total:         d.Total,
 		Sold:          d.Sold,
-		Expiry:        parseTime(d.Expiry),
+		Expiry:        d.Expiry.Time(),
 	}
 }
 
@@ -310,7 +316,7 @@ func GetSorties() ([]*draw.Sortie, error) {
 func translateSortie(s *wsSortie) *draw.Sortie {
 	act := &draw.Sortie{
 		Boss:   bossName(s.Boss),
-		Expiry: parseTime(s.Expiry),
+		Expiry: s.Expiry.Time(),
 	}
 	for i := range s.Variants {
 		act.Variants = append(act.Variants, &draw.SortieVariant{
@@ -354,9 +360,9 @@ func parseWorldStateEnvelope[T any](name string) (*T, error) {
 // 仅覆盖 node/faction，其余字段透传）。
 func translateActiveMission(m *wsActiveMission) *draw.ActiveMission {
 	act := &draw.ActiveMission{
-		ID:          m.ID,
-		Activation:  parseTime(m.Activation),
-		Expiry:      parseTime(m.Expiry),
+		ID:          m.ID.String(),
+		Activation:  m.Activation.Time(),
+		Expiry:      m.Expiry.Time(),
 		MissionType: drawplugin.MissionType(m.MissionType),
 		Modifier:    drawplugin.VoidTier(m.Modifier),
 		Node:        TranslateNode(m.Node),
@@ -376,9 +382,9 @@ func translateActiveMission(m *wsActiveMission) *draw.ActiveMission {
 // voidStormToActiveMission 构造九重天任务（对齐 Java VOID_STORMS 分支）。
 func voidStormToActiveMission(v *wsVoidStorm) *draw.ActiveMission {
 	return &draw.ActiveMission{
-		ID:          v.ID,
-		Activation:  parseTime(v.Activation),
-		Expiry:      parseTime(v.Expiry),
+		ID:          v.ID.String(),
+		Activation:  v.Activation.Time(),
+		Expiry:      v.Expiry.Time(),
 		MissionType: nodeMissionTypeByKey(v.Node),
 		Modifier:    drawplugin.VoidTier(v.Tier),
 		Node:        TranslateNode(v.Node),
