@@ -167,7 +167,7 @@ git log --no-merges --pretty=format:'%aN%x09%aE' "$RANGE" > "$WORK/authors.tsv" 
 if command -v gh >/dev/null 2>&1 && [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   # 只取该 tag 上已关联 GitHub 账号的提交；失败（无网络/无权限/非 GitHub）时静默回退
   gh api --paginate "repos/${REPO_SLUG}/commits?sha=${TARGET_SHA}&per_page=100" \
-    --jq '.[] | select(.author.login != null) | [(.commit.author.email // ""), .author.login] | @tsv' \
+    --jq '.[] | select(.author.login != null) | [(.commit.author.email // ""), .author.login, (.commit.author.name // "")] | @tsv' \
     > "$WORK/logins.tsv" 2>/dev/null || : > "$WORK/logins.tsv"
 fi
 
@@ -182,20 +182,24 @@ awk -F'\t' -v logins="$WORK/logins.tsv" '
     while ((getline line < logins) > 0) {
       split(line, f, "\t")
       if (f[1] != "" && f[2] != "") login[tolower(f[1])] = f[2]
+      # 同一账号往往只有部分提交邮箱被 GitHub 关联（其余提交的 author 为 null，取不到登录名），
+      # 所以再按提交里显示的作者名兜底映射一次，否则同一个人会被拆成「@登录名」和「作者名」两行
+      if (f[2] != "" && f[3] != "") byname[tolower(f[3])] = f[2]
     }
     close(logins)
   }
   {
     name = $1; email = tolower($2)
     if (email == "") next
-    # 有 GitHub 登录名就按登录名合并（同一人的多个邮箱归一）；拿不到登录名时退化为按作者名合并，
-    # 避免同一个人的两个邮箱在表里出现两行
-    if (email in login) key = "login:" login[email]
+    lgn = ""
+    if (email in login) lgn = login[email]
+    else if (!isbot(name, email) && (tolower(name) in byname)) lgn = byname[tolower(name)]
+    if (lgn != "") key = "login:" lgn
     else if (name != "") key = "name:" tolower(name)
     else key = "email:" email
     if (!(key in cnt)) {
       order[++n] = key
-      disp[key] = (email in login) ? "@" login[email] : name
+      disp[key] = (lgn != "") ? "@" lgn : name
       names[key] = name
       emails[key] = email
       flag[key] = isbot(name, email) ? "bot" : "human"
