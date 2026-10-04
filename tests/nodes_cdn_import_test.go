@@ -1,5 +1,5 @@
 // 星图节点导入回归测试（对齐 Java NodeService.initData：ExportRegions 导出 + CDN nodes.json）：
-// 覆盖两种载荷解析、CDN 条目与导出节点的主键合并（CDN 覆盖同名节点）、空主键过滤，
+// 覆盖两种载荷解析、CDN 只补官方导出缺失的节点（同名节点保留官方导出数据）、空主键过滤，
 // 以及 CDN 不可用时保留官方导出数据。
 package tests
 

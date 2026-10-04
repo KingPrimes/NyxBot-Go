@@ -25,6 +25,17 @@ var executableDir = func() (string, error) {
 	return filepath.Dir(exePath), nil
 }
 
+// adminCredentialsPathOverride 非空时替代「可执行文件同级」的默认凭据路径（供黑盒测试注入）。
+var adminCredentialsPathOverride string
+
+// SetAdminCredentialsPath 覆盖 admin-credentials.txt 的路径，空串恢复默认（可执行文件同级），
+// 返回原值（供黑盒测试验证写入失败等分支）。
+func SetAdminCredentialsPath(path string) string {
+	previous := adminCredentialsPathOverride
+	adminCredentialsPathOverride = path
+	return previous
+}
+
 // ensureDefaultAdmin 检查是否存在系统用户，无则创建随机初始管理员并写入凭据文件。
 // 只有库里一个用户都没有时才会走到写文件这一步，因此这里的写入必须覆盖旧文件：
 // data 目录的数据库被删除（或换成空库）后会重新生成管理员，若沿用旧的 admin-credentials.txt，
@@ -51,19 +62,24 @@ func ensureDefaultAdmin() error {
 		return err
 	}
 
-	// 先写凭据文件再落库：写文件失败时库仍是空的（count 保持为 0），
-	// 下次启动会重新生成并再次覆盖凭据文件；反过来先落库再写文件一旦失败，
-	// 就会留下「库里已有管理员、但明文密码无人知晓」的死局。
-	if err := writeAdminCredentials(username, password); err != nil {
-		return err
-	}
-
 	user := system.SysUser{
 		UserID:   1,
 		UserName: username,
 		Password: string(hash),
 	}
 	if err := DB.Create(&user).Error; err != nil {
+		return err
+	}
+
+	// 落库成功后再写凭据文件，保证文件内容始终对应库里真正建成的那个管理员
+	//（两个进程同时初始化空库时，Create 失败的一方不会碰文件）。
+	// 写文件失败则回滚刚建的管理员：库回到空（count=0），下次启动重新生成并覆盖凭据文件；
+	// 否则会留下「库里已有管理员、但明文密码无人知晓」的死局。
+	if err := writeAdminCredentials(username, password); err != nil {
+		if rollbackErr := DB.Delete(&user).Error; rollbackErr != nil {
+			logging.ErrorPack("database",
+				"rollback default admin after credential write failure failed: %v", rollbackErr)
+		}
 		return err
 	}
 
@@ -74,13 +90,18 @@ func ensureDefaultAdmin() error {
 // writeAdminCredentials 把初始管理员凭据覆盖写入可执行文件同级的 admin-credentials.txt。
 // 该文件是明文初始密码的唯一存放处（库里只有 bcrypt 哈希），所以新建管理员时必须覆盖旧内容，
 // 否则数据库被删除后重新生成的管理员无法按文件里的账号登录。
-// 先写 ".tmp" 再原子改名，避免写入中断留下半截凭据；权限 0600（仅属主可读）。
+// 用同目录的 os.CreateTemp（默认 0600、文件名唯一）写临时文件再原子改名：
+// 既避免复用固定 ".tmp" 名继承旧文件的宽松权限（Unix 上可能被同机其他用户读到明文密码），
+// 也避免两个写者撞同一临时文件；任何一步失败都删除临时文件。
 func writeAdminCredentials(username, password string) error {
-	dir, err := executableDir()
-	if err != nil {
-		return err
+	path := adminCredentialsPathOverride
+	if path == "" {
+		dir, err := executableDir()
+		if err != nil {
+			return err
+		}
+		path = filepath.Join(dir, adminCredentialsFile)
 	}
-	path := filepath.Join(dir, adminCredentialsFile)
 
 	content := strings.Join([]string{
 		"NyxBot initial administrator credentials",
@@ -91,8 +112,18 @@ func writeAdminCredentials(username, password string) error {
 		"Please change the password after first login.",
 	}, "\n") + "\n"
 
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(content), 0600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), adminCredentialsFile+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	if err := os.Rename(tmpPath, path); err != nil {

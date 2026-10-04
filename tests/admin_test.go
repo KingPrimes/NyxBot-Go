@@ -143,3 +143,38 @@ func TestInitRewritesAdminCredentialsAfterDatabaseRemoved(t *testing.T) {
 		t.Fatalf("库被删除后凭据文件仍是旧的账号密码: %s / %s", username, password)
 	}
 }
+
+// TestInitRollsBackAdminWhenCredentialsWriteFails 验证凭据文件写入失败时会回滚刚创建的管理员：
+// 库回到空（count=0），下次启动可重新生成并覆盖凭据文件；否则会留下
+// 「库里已有管理员、但明文密码无人知晓」的死局（Init 会 panic 退出，属预期）。
+func TestInitRollsBackAdminWhenCredentialsWriteFails(t *testing.T) {
+	// 用一个普通文件占住目录位置：凭据路径落在它下面时 os.CreateTemp 必然失败
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	previous := database.SetAdminCredentialsPath(filepath.Join(blocker, adminCredentialsFileName))
+	t.Cleanup(func() { database.SetAdminCredentialsPath(previous) })
+
+	dbPath := filepath.Join(t.TempDir(), "rollback.db")
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("凭据文件写入失败时 Init 应当报错退出")
+			}
+		}()
+		database.Init(dbPath, false, "silent", 0)
+	}()
+	defer closeGlobalDB(t)
+
+	if database.DB == nil {
+		t.Fatal("Init 失败后全局 DB 应仍然可用（用于校验回滚结果）")
+	}
+	var count int64
+	if err := database.DB.Model(&modelsystem.SysUser{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("凭据写入失败后应回滚管理员，实际仍有 %d 个用户", count)
+	}
+}

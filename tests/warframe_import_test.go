@@ -398,7 +398,7 @@ func TestParseSQLSlowThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	const marker = "slow-threshold-marker-3f9c"
-	if err := db.Exec("SELECT '" + marker + "'").Error; err != nil {
+	if err := db.Exec("SELECT ?", marker).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range logging.Recent(logging.LevelWarn) {
