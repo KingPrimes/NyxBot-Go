@@ -27,7 +27,8 @@ go run ./cmd/server
 ```
 
 首次启动会自动创建 `config.yaml`（含随机 JWT 密钥）与 `data/nyxbot.db`，并在可执行文件同级目录写出
-`admin-credentials.txt`（随机管理员账号，**已存在则跳过**）。健康检查：
+`admin-credentials.txt`（随机管理员账号）。库里已有用户时重启不会改动该文件；数据库被删除/清空后
+会重新生成管理员并**覆盖**该文件（旧密码已失效，不覆盖就无法登录）。健康检查：
 
 ```bash
 curl http://localhost:8080/api/health      # {"code":200,"msg":"success","data":{"status":"ok"}}
@@ -157,8 +158,8 @@ resources/static/             # 前端构建产物（不入库，保留 .gitkeep
 以下路径**不应提交**（已在 `.gitignore` 中）：
 
 - `config.yaml`：运行期配置，缺失时自动生成。
-- `admin-credentials.txt`：首启生成的随机管理员账号。
-- `data/`：SQLite 库、`data/logs/`、WorldState 快照 `data/status`、仲裁缓存 `data/arbitration`。
+- `admin-credentials.txt`：随机初始管理员账号（库中已有用户时不动它；数据库被删除后会覆盖为新的账号密码）。
+- `data/`：SQLite 库、`data/logs/`、WorldState 快照 `data/status`、仲裁缓存 `data/arbitration`、未翻译清单 `data/UntranslatedRelicsRewardsName.json`（遗物导入与世界状态翻译未命中时按 uniqueName 去重登记，供人工补齐后回填 `state_translation`）。
 - `temp/`：绘图测试输出的 PNG。
 - `resources/static/`、`resources/templates/`：前端构建产物（编译期由 `go:embed` 打进二进制）。
 - `cmd/server/resource.syso`：`build.ps1` / CI 生成。

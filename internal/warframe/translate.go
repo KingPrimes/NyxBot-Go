@@ -15,7 +15,7 @@ import (
 
 // TranslateNode 将节点唯一标识翻译为 "名称(星系)"（对齐 Java WorldStateUtils：
 // nodesRepository.findById(node) → name + "(" + systemName + ")"）。
-// 未命中或数据库不可用时回退原文。
+// 未命中（或节点没有名称）时回退原文并登记到未翻译清单，供后续补数据。
 func TranslateNode(nodeKey string) string {
 	if nodeKey == "" || database.DB == nil {
 		return nodeKey
@@ -24,11 +24,14 @@ func TranslateNode(nodeKey string) string {
 	if err := database.DB.Where("unique_name = ?", nodeKey).First(&node).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			logging.DebugPack("warframe.translate", "query node %q failed: %v", nodeKey, err)
+			return nodeKey
 		}
+		recordTranslationMiss(nodeKey)
 		return nodeKey
 	}
 	name := node.Name
 	if name == "" {
+		recordTranslationMiss(nodeKey)
 		return nodeKey
 	}
 	if node.SystemName != "" {
@@ -40,7 +43,7 @@ func TranslateNode(nodeKey string) string {
 // TranslateStateName 将物品唯一标识翻译为中文名（对齐 Java StateTranslationService.getName：
 // 先按 StringUtils.getLastThreeSegments 截取末三段，再用 StateTranslationRepository.findByUniqueName
 // 的后缀语义查询 state_translation）。
-// 未命中或数据库不可用时回退原文。
+// 未命中时回退原文并登记到未翻译清单，供后续补翻译。
 func TranslateStateName(uniqueName string) string {
 	if uniqueName == "" {
 		return uniqueName
@@ -48,12 +51,13 @@ func TranslateStateName(uniqueName string) string {
 	if name := TranslateStateNameSuffix(getLastThreeSegments(uniqueName)); name != "" {
 		return name
 	}
+	recordTranslationMiss(uniqueName)
 	return uniqueName
 }
 
 // TranslateStateNameDirect 按原始 uniqueName 查 state_translation（不做 last3 段截取），
 // 同样使用 Java 的后缀语义。用于 Java 侧直接 findByUniqueName(完整路径) 的场景：
-// 警报奖励物品、1999 日历事件字段等。未命中或数据库不可用时回退原文。
+// 警报奖励物品、1999 日历事件字段等。未命中时回退原文并登记到未翻译清单。
 func TranslateStateNameDirect(uniqueName string) string {
 	if uniqueName == "" {
 		return uniqueName
@@ -61,7 +65,18 @@ func TranslateStateNameDirect(uniqueName string) string {
 	if name := TranslateStateNameSuffix(uniqueName); name != "" {
 		return name
 	}
+	recordTranslationMiss(uniqueName)
 	return uniqueName
+}
+
+// recordTranslationMiss 登记一次翻译未命中（uniqueName 为空时不登记）。
+// 数据库不可用时说明翻译查询压根没有执行（如单元测试、启动早期），此时不登记，
+// 否则会把整套原始数据写进未翻译清单。
+func recordTranslationMiss(uniqueName string) {
+	if uniqueName == "" || database.DB == nil {
+		return
+	}
+	RecordUntranslated(uniqueName)
 }
 
 // TranslateStateNameSuffix 按 Java StateTranslationRepository.findByUniqueName 的后缀语义取中文名：

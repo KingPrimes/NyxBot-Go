@@ -54,6 +54,10 @@ type LogConfig struct {
 	// SQLLevel GORM SQL 日志级别，取值 silent/error/warn/info（见 comment 标签与 config.yaml 注释）；
 	// 空值或非法值由 database.ParseSQLLogLevel 回退 warn。
 	SQLLevel string `yaml:"sql_level" comment:"GORM SQL 日志级别：silent/error/warn/info（warn=仅错误与慢查询；info=输出全部 SQL，DEBUG 级）"`
+	// SQLSlowMS GORM 慢查询告警阈值（毫秒）：耗时超过它的 SQL 记 WARN（pack=database.sql）。
+	// <=0（含老配置文件没有该字段）由 database.ParseSQLSlowThreshold 回退默认 600ms；
+	// 想完全不记慢查询请把 sql_level 设为 error，而不是靠这个阈值。
+	SQLSlowMS int `yaml:"sql_slow_ms" comment:"GORM 慢查询告警阈值（毫秒），0=默认 600；不想看慢查询告警请把 sql_level 设为 error"`
 }
 
 // OneBot 连接模式常量（BotConfig.Mode 的合法取值）。
@@ -317,6 +321,9 @@ func defaultConfig() Config {
 			MaxAgeDays:    7,
 			HistorySize:   50,
 			SQLLevel:      "warn",
+			// 600ms：遗物导入的子表批量 INSERT（3002 行 / 18012 个绑定参数）实测约 200ms，
+			// 若沿用 GORM 默认 200ms 会在每次数据更新时刷出无意义的慢查询告警。
+			SQLSlowMS: 600,
 		},
 		Bot: BotConfig{
 			Mode:         "server",

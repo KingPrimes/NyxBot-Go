@@ -361,6 +361,54 @@ func TestParseSQLLogLevel(t *testing.T) {
 	}
 }
 
+// TestParseSQLSlowThreshold 验证 config.yaml 的 log.sql_slow_ms 解析：
+// 正数按毫秒生效；0/负数/字段缺失（老配置）回退默认 600ms，避免升级后行为突变。
+// 另验证默认阈值下「快查询不会刷慢查询告警」（遗物导入的 200ms 级批量写入已在其下方）。
+func TestParseSQLSlowThreshold(t *testing.T) {
+	if database.DefaultSQLSlowThreshold != 600*time.Millisecond {
+		t.Fatalf("默认阈值应为 600ms，实际 %v", database.DefaultSQLSlowThreshold)
+	}
+	cases := map[int]time.Duration{
+		0:    database.DefaultSQLSlowThreshold, // 字段缺失/未设置
+		-1:   database.DefaultSQLSlowThreshold, // 非法值
+		1:    time.Millisecond,
+		600:  600 * time.Millisecond,
+		1500: 1500 * time.Millisecond,
+	}
+	for input, want := range cases {
+		if got := database.ParseSQLSlowThreshold(input); got != want {
+			t.Errorf("ParseSQLSlowThreshold(%d) = %v, want %v", input, got, want)
+		}
+	}
+
+	// 默认阈值下执行一条带唯一标记的快 SQL：不应出现针对它的 SLOW SQL 告警
+	// （日志历史全局共享，其它用例会写入自己的 SLOW SQL 记录，故只校验本用例的标记）
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "slow-threshold.db")), &gorm.Config{
+		Logger: database.NewGORMLogger(logger.Warn, database.DefaultSQLSlowThreshold, true),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&modelwarframe.StateTranslation{}); err != nil {
+		t.Fatal(err)
+	}
+	const marker = "slow-threshold-marker-3f9c"
+	if err := db.Exec("SELECT ?", marker).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range logging.Recent(logging.LevelWarn) {
+		if entry.Pack == "database.sql" && strings.Contains(entry.Message, "SLOW SQL") &&
+			strings.Contains(entry.Message, marker) {
+			t.Fatalf("默认 600ms 阈值下快查询不应产生慢查询告警: %s", entry.Message)
+		}
+	}
+}
+
 // TestGORMLoggerRoutesToUnifiedLogging 验证 GORM 日志统一走 internal/logging：
 // ①「记录不存在」是预期命中失败，不再刷 ERROR；② 真实 SQL 错误以 pack=database.sql + ERROR 进入统一日志。
 // 说明：不调用 logging.Init，直接读取其内存历史，避免改动全局日志配置影响其它用例。
