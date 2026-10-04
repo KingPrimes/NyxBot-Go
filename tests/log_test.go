@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -338,5 +339,96 @@ func TestLogExportJSON(t *testing.T) {
 	}
 	if !strings.Contains(payload.Logs[0].Log, marker) {
 		t.Errorf("exported log missing marker: %+v", payload.Logs[0])
+	}
+}
+
+// TestParseLevel 验证级别名解析：大小写/空白不敏感，非法值回退 INFO 并由 ok=false 标记。
+func TestParseLevel(t *testing.T) {
+	cases := []struct {
+		in    string
+		want  logging.Level
+		valid bool
+	}{
+		{"TRACE", logging.LevelTrace, true},
+		{"debug", logging.LevelDebug, true},
+		{" Info ", logging.LevelInfo, true},
+		{"warning", logging.LevelWarn, true},
+		{"ERROR", logging.LevelError, true},
+		{"panic", logging.LevelPanic, true},
+		{"HTTP", logging.LevelHTTP, true},
+		{"", logging.LevelInfo, false},
+		{"verbose", logging.LevelInfo, false},
+	}
+	for _, tc := range cases {
+		level, ok := logging.ParseLevel(tc.in)
+		if level != tc.want || ok != tc.valid {
+			t.Errorf("ParseLevel(%q) = %v, %v; want %v, %v", tc.in, level, ok, tc.want, tc.valid)
+		}
+		if got := logging.TrimLevel(tc.in); got != tc.want {
+			t.Errorf("TrimLevel(%q) = %v; want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestLogFileLevelGating 验证日志等级只约束落盘：
+// 低于等级的条目仍进内存历史（控制台/SSE 的数据源），但不写入日志文件。
+func TestLogFileLevelGating(t *testing.T) {
+	logDir := t.TempDir()
+	logging.Init(logging.Config{Dir: logDir, Level: "ERROR", ConsoleEnabled: false})
+	// 还原默认状态，避免全局日志状态影响同包其他用例
+	defer logging.Init(logging.Config{Dir: filepath.Join("data", "logs"), Level: "INFO", ConsoleEnabled: true})
+
+	if logging.FileLevelEnabled(logging.LevelInfo) || logging.FileLevelEnabled(logging.LevelDebug) {
+		t.Fatal("等级设为 ERROR 后 INFO/DEBUG 不应落盘")
+	}
+	if !logging.FileLevelEnabled(logging.LevelError) {
+		t.Fatal("等级设为 ERROR 后 ERROR 应落盘")
+	}
+
+	marker := "levelgate-5b2c"
+	logging.DebugPack("tests", "%s-debug", marker)
+	logging.InfoPack("tests", "%s-info", marker)
+	logging.ErrorPack("tests", "%s-error", marker)
+
+	// 内存历史不按等级过滤：三级条目都应记录（SSE/搜索/导出依赖它）
+	for _, want := range []string{"-debug", "-info", "-error"} {
+		found := false
+		for _, entry := range logging.Recent(logging.LevelTrace) {
+			if strings.Contains(entry.Message, marker+want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("内存历史缺少 %q，等级不应影响控制台/SSE 数据源", marker+want)
+		}
+	}
+
+	// 日志文件只应包含 ERROR 级条目
+	files, err := filepath.Glob(filepath.Join(logDir, "*.log"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("未生成日志文件: files=%v err=%v", files, err)
+	}
+	content := ""
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("读取日志文件失败: %v", err)
+		}
+		content += string(data)
+	}
+	if !strings.Contains(content, marker+"-error") {
+		t.Errorf("ERROR 级日志未落盘:\n%s", content)
+	}
+	for _, unwanted := range []string{marker + "-debug", marker + "-info"} {
+		if strings.Contains(content, unwanted) {
+			t.Errorf("低于等级的日志被写入文件: %s", unwanted)
+		}
+	}
+
+	// 运行期调整等级后立即生效
+	logging.SetFileLevel(logging.LevelDebug)
+	if !logging.FileLevelEnabled(logging.LevelDebug) {
+		t.Error("SetFileLevel(DEBUG) 后 DEBUG 应落盘")
 	}
 }

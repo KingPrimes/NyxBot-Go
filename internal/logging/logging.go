@@ -48,6 +48,10 @@ type Config struct {
 	MaxAgeDays     int
 	HistorySize    int
 	ConsoleEnabled bool
+	// Level 写入日志文件的最低等级（TRACE/DEBUG/INFO/WARN/ERROR/PANIC，大小写不敏感）。
+	// 该等级只约束落盘：控制台始终输出全部等级，SSE 由订阅端按 pack/level 自行过滤。
+	// 空串或非法值保持当前等级不变（包默认 INFO）。
+	Level string
 }
 
 var (
@@ -55,7 +59,7 @@ var (
 	subscribers = map[Subscriber]struct{}{}
 	history     []Entry
 	std         = log.New(os.Stdout, "", 0)
-	current     = LevelInfo
+	fileLevel   = LevelInfo
 	logger      *fileLogger
 	config      = Config{
 		Dir:            filepath.Join("data", "logs"),
@@ -88,6 +92,10 @@ func Init(cfg Config) {
 		config.HistorySize = cfg.HistorySize
 	}
 	config.ConsoleEnabled = cfg.ConsoleEnabled
+	// 空串/非法值不改动当前等级，避免部分初始化的调用意外重置运行期通过 SetFileLevel 调整的等级
+	if level, ok := ParseLevel(cfg.Level); ok {
+		fileLevel = level
+	}
 
 	log.SetFlags(0)
 	log.SetOutput(os.Stdout)
@@ -218,7 +226,9 @@ func output(entry Entry) {
 	if config.ConsoleEnabled {
 		std.Println(formatted)
 	}
-	if logger != nil {
+	// 等级只约束落盘：控制台始终输出全部等级，内存历史与 SSE 订阅也照常分发，
+	// 由订阅端按 pack/level 自行过滤。
+	if logger != nil && FileLevelEnabled(entry.Level) {
 		_ = logger.Write([]byte(formatted + "\n"))
 	}
 	appendHistory(entry)
@@ -280,34 +290,48 @@ func appendHistory(entry Entry) {
 	history = append(history, entry)
 }
 
-// SetLevel 设置全局最低日志级别。
-func SetLevel(level Level) {
-	current = level
+// SetFileLevel 设置写入日志文件的最低等级，低于该等级的日志不再落盘。
+// 控制台输出与 SSE 分发不受该等级影响。
+func SetFileLevel(level Level) {
+	mu.Lock()
+	defer mu.Unlock()
+	fileLevel = level
 }
 
-// LevelEnabled 判断指定级别是否被当前全局级别允许。
-func LevelEnabled(level Level) bool {
-	return levelAllowed(level, current)
+// FileLevelEnabled 判断指定级别是否达到当前日志文件输出等级（即是否会被写入日志文件）。
+func FileLevelEnabled(level Level) bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return levelAllowed(level, fileLevel)
+}
+
+// ParseLevel 将字符串解析为 Level，ok 表示 s 是合法级别名（忽略大小写与首尾空白）。
+// 解析失败时返回 LevelInfo 与 false，调用方可据此保留原有等级。
+func ParseLevel(s string) (Level, bool) {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "TRACE":
+		return LevelTrace, true
+	case "DEBUG":
+		return LevelDebug, true
+	case "INFO":
+		return LevelInfo, true
+	case "WARN", "WARNING":
+		return LevelWarn, true
+	case "ERROR":
+		return LevelError, true
+	case "PANIC":
+		return LevelPanic, true
+	case "HTTP":
+		return LevelHTTP, true
+	default:
+		return LevelInfo, false
+	}
 }
 
 // TrimLevel 将字符串解析为 Level，不合法时返回 LevelInfo。
 func TrimLevel(s string) Level {
-	switch strings.ToUpper(strings.TrimSpace(s)) {
-	case "TRACE":
-		return LevelTrace
-	case "DEBUG":
-		return LevelDebug
-	case "WARN", "WARNING":
-		return LevelWarn
-	case "ERROR":
-		return LevelError
-	case "PANIC":
-		return LevelPanic
-	case "HTTP":
-		return LevelHTTP
-	default:
-		return LevelInfo
-	}
+	level, _ := ParseLevel(s)
+	return level
 }
 
 func levelAllowed(actual Level, min Level) bool {

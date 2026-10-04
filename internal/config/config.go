@@ -44,12 +44,13 @@ type DatabaseConfig struct {
 
 // LogConfig 日志系统配置。
 type LogConfig struct {
-	Startup       bool   `yaml:"startup" comment:"启动时是否打印初始化日志"`                  // 启动时是否打印初始化日志
-	Console       bool   `yaml:"console" comment:"是否输出日志到控制台"`                    // 是否输出到控制台
-	Dir           string `yaml:"dir" comment:"日志文件目录"`                            // 日志文件目录
-	MaxFileSizeMB int    `yaml:"max_file_size_mb" comment:"单个日志文件最大体积（MB），超出后轮转"` // 单个日志文件最大体积（MB）
-	MaxAgeDays    int    `yaml:"max_age_days" comment:"日志文件保留天数"`                 // 日志文件保留天数
-	HistorySize   int    `yaml:"history_size" comment:"内存中保留的历史日志条数"`             // 内存中保留的历史日志条数
+	Level         string `yaml:"level" comment:"写入日志文件的最低等级：TRACE / DEBUG / INFO / WARN / ERROR / PANIC（控制台输出全部等级）"` // 日志文件最低等级，控制台与 SSE 不受影响
+	Startup       bool   `yaml:"startup" comment:"启动时是否打印初始化日志"`                                                     // 启动时是否打印初始化日志
+	Console       bool   `yaml:"console" comment:"是否输出日志到控制台"`                                                       // 是否输出到控制台
+	Dir           string `yaml:"dir" comment:"日志文件目录"`                                                               // 日志文件目录
+	MaxFileSizeMB int    `yaml:"max_file_size_mb" comment:"单个日志文件最大体积（MB），超出后轮转"`                                    // 单个日志文件最大体积（MB）
+	MaxAgeDays    int    `yaml:"max_age_days" comment:"日志文件保留天数"`                                                    // 日志文件保留天数
+	HistorySize   int    `yaml:"history_size" comment:"内存中保留的历史日志条数"`                                                // 内存中保留的历史日志条数
 }
 
 // OneBot 连接模式常量（BotConfig.Mode 的合法取值）。
@@ -162,6 +163,12 @@ func LoadFrom(path string) Config {
 	}
 
 	overrideFromEnv(&cfg)
+
+	// 无效的日志等级会静默回退到 INFO，这里显式提示，避免配置写错后无人察觉
+	// （检查放在环境变量覆盖之后，以实际生效的值为准）
+	if _, ok := logging.ParseLevel(cfg.Log.Level); !ok {
+		logging.WarnPack("config", "log.level %q is not a valid level (TRACE/DEBUG/INFO/WARN/ERROR/PANIC), falling back to INFO", cfg.Log.Level)
+	}
 
 	return cfg
 }
@@ -299,6 +306,7 @@ func defaultConfig() Config {
 			Path: "data/nyxbot.db",
 		},
 		Log: LogConfig{
+			Level:         "INFO",
 			Startup:       true,
 			Console:       true,
 			Dir:           "data/logs",
@@ -341,6 +349,9 @@ func overrideFromEnv(cfg *Config) {
 	}
 	if v := os.Getenv("APP_STARTUP_LOG"); v == "false" || v == "0" {
 		cfg.Log.Startup = false
+	}
+	if v := os.Getenv("APP_LOG_LEVEL"); v != "" {
+		cfg.Log.Level = v
 	}
 	if v := os.Getenv("APP_LOG_CONSOLE"); v == "false" || v == "0" {
 		cfg.Log.Console = false
