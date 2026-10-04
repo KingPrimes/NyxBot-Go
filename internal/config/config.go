@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -130,13 +131,15 @@ func (r *Runtime) Path() string {
 	return r.path
 }
 
-// Update 在写锁内通过 fn 修改配置，随后将完整配置写回 YAML 文件。
-// 写文件失败时内存中的修改仍然保留，调用方可据此决定是否向客户端报错。
+// Update 在写锁内通过 fn 修改配置，随后把改动最小化写回 YAML 文件：
+// 只更新值发生变化的键，并把结构体里有、文件里缺的键补写回去（见 syncConfigFile）。
+// 写文件失败（或补丁校验不通过）时内存中的修改仍然保留，调用方可据此决定是否向客户端报错。
 func (r *Runtime) Update(fn func(*Config)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	before := r.cfg
 	fn(&r.cfg)
-	return writeConfig(r.path, r.cfg)
+	return syncConfigFile(r.path, before, r.cfg)
 }
 
 // Load 加载默认路径 config.yaml 的配置文件，返回合并了环境变量覆盖的完整配置。
@@ -188,25 +191,24 @@ func generateJwtSecret() string {
 	return hex.EncodeToString(buf)
 }
 
-// writeConfig 将配置以带字段注释的 YAML 格式写入指定路径。
+// writeConfig 将配置以带字段注释的 YAML 格式整份写入指定路径（仅在文件不存在或需要重建时使用）。
 func writeConfig(path string, cfg Config) error {
 	data, err := marshalWithComments(cfg)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return writeFileAtomic(path, data)
 }
 
 // marshalWithComments 将配置编码为带注释的 YAML 字节流。
 // 注释文本取自结构体字段的 comment 标签，作为头注释挂到对应条目上方；
 // 顶层分节之间插入空行便于阅读。
 func marshalWithComments(cfg Config) ([]byte, error) {
-	node := &yaml.Node{}
-	if err := node.Encode(cfg); err != nil {
+	node, err := configNode(cfg)
+	if err != nil {
 		return nil, err
 	}
-	applyComments(node, "", fieldComments())
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -218,6 +220,41 @@ func marshalWithComments(cfg Config) ([]byte, error) {
 		return nil, err
 	}
 	return separateSections(buf.Bytes()), nil
+}
+
+// configNode 把配置编码为 YAML 节点树，并按 comment 标签挂上各键的头注释。
+// 供整份生成（marshalWithComments）与最小写入（syncConfigFile）共用。
+func configNode(cfg Config) (*yaml.Node, error) {
+	node := &yaml.Node{}
+	if err := node.Encode(cfg); err != nil {
+		return nil, err
+	}
+	applyComments(node, "", fieldComments())
+	return node, nil
+}
+
+// writeFileAtomic 先写同目录临时文件再改名，避免写入中断留下半截配置。
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // fieldComments 通过反射收集 Config 结构体字段的 comment 标签，
