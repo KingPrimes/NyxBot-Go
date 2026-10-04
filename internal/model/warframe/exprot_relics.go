@@ -6,6 +6,7 @@ package warframe
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
 // Relics 遗物条目。uniqueName 为字符串主键。
@@ -22,13 +23,17 @@ func (Relics) TableName() string {
 	return "relics"
 }
 
-// RelicRewards 遗物掉落物品条目。id 为 UUID 字符串主键。
+// RelicRewards 遗物掉落物品条目。id 为
+// "{遗物uniqueName}|{奖励原始uniqueName}|{稀有度}|{等级}|{数量}" 的确定性主键。
+// 官方导出文件的 relicRewards 不含 id，且同一奖励物品（如赤毒、Forma 蓝图）会被多个遗物共用；
+// 若直接拿奖励物品名当主键，不同遗物会互相覆盖（对齐 Java @GeneratedValue(UUID) 的「每个遗物各自成行」语义，
+// 但保持可重复导入的幂等性）。
 // Rarity 数据库列存 RarityEnum ORDINAL 序数，JSON 输出枚举名（对齐 Jackson）。
 // JSON 字段对齐前端 Api.LocalData.RelicReward。
 type RelicRewards struct {
-	ID         string `gorm:"primaryKey" json:"id"`                 // 主键（UUID）
+	ID         string `gorm:"primaryKey" json:"id"`                 // 主键（遗物uniqueName|奖励uniqueName|稀有度|等级|数量）
 	RelicsID   string `gorm:"column:relics_id" json:"-"`            // 所属遗物外键（不输出）
-	RewardName string `gorm:"column:reward_name" json:"rewardName"` // 物品名称
+	RewardName string `gorm:"column:reward_name" json:"rewardName"` // 物品名称（已翻译为中文，未命中保留原始 uniqueName）
 	Rarity     int    `gorm:"column:rarity" json:"-"`               // 稀有度（RarityEnum ORDINAL，JSON 由 MarshalJSON 输出枚举名）
 	Tier       int    `gorm:"column:tier" json:"tier"`              // 等级
 	ItemCount  int    `gorm:"column:item_count" json:"itemCount"`   // 数量
@@ -38,14 +43,21 @@ func (RelicRewards) TableName() string {
 	return "relic_rewards"
 }
 
-// MarshalJSON 输出 rarity 为枚举名字符串（对齐 Jackson 枚举序列化）。
+// MarshalJSON 输出 rarity 为枚举名字符串（对齐 Jackson 枚举序列化），
+// 并在 itemCount > 1 时把数量前缀进 rewardName（对齐 Java RelicRewards.getRewardName）：
+// 例如 1200X赤毒。
 func (record RelicRewards) MarshalJSON() ([]byte, error) {
 	type plain RelicRewards
 	aliased := plain(record)
+	rewardName := record.RewardName
+	if record.ItemCount > 1 {
+		rewardName = strconv.Itoa(record.ItemCount) + "X" + rewardName
+	}
 	return json.Marshal(struct {
 		plain
-		Rarity string `json:"rarity"`
-	}{plain: aliased, Rarity: rarityOrdinalToName(record.Rarity)})
+		RewardName string `json:"rewardName"`
+		Rarity     string `json:"rarity"`
+	}{plain: aliased, RewardName: rewardName, Rarity: rarityOrdinalToName(record.Rarity)})
 }
 
 // UnmarshalJSON 接受 rarity 为枚举名或序数，统一转 ORDINAL 入库。

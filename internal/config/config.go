@@ -51,6 +51,9 @@ type LogConfig struct {
 	MaxFileSizeMB int    `yaml:"max_file_size_mb" comment:"单个日志文件最大体积（MB），超出后轮转"`                                    // 单个日志文件最大体积（MB）
 	MaxAgeDays    int    `yaml:"max_age_days" comment:"日志文件保留天数"`                                                    // 日志文件保留天数
 	HistorySize   int    `yaml:"history_size" comment:"内存中保留的历史日志条数"`                                                // 内存中保留的历史日志条数
+	// SQLLevel GORM SQL 日志级别，取值 silent/error/warn/info（见 comment 标签与 config.yaml 注释）；
+	// 空值或非法值由 database.ParseSQLLogLevel 回退 warn。
+	SQLLevel string `yaml:"sql_level" comment:"GORM SQL 日志级别：silent/error/warn/info（warn=仅错误与慢查询；info=输出全部 SQL，DEBUG 级）"`
 }
 
 // OneBot 连接模式常量（BotConfig.Mode 的合法取值）。
@@ -313,6 +316,7 @@ func defaultConfig() Config {
 			MaxFileSizeMB: 5,
 			MaxAgeDays:    7,
 			HistorySize:   50,
+			SQLLevel:      "warn",
 		},
 		Bot: BotConfig{
 			Mode:         "server",

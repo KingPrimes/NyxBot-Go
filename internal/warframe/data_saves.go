@@ -240,36 +240,12 @@ type stateTypeOption struct {
 }
 
 // StateTranslationTypes 处理 GET /data/warframe/state-translation/types，
-// 返回 StateTypeEnum 全部值 {value=枚举名, label=中文名}（对齐 Java types()）。
+// 返回 StateTypeEnum 全部值 {value=枚举名, label=中文名}（对齐 Java StateTranslationController.types()）。
+// 数据源为 modelwarframe.StateTypes 单一事实来源，不再维护平行映射。
 func (h *DataHandler) StateTranslationTypes(c *gin.Context) {
-	options := make([]stateTypeOption, 0, len(stateTypeNames))
-	for _, name := range stateTypeNames {
-		options = append(options, stateTypeOption{Value: name, Label: stateTypeLabel(name)})
+	options := make([]stateTypeOption, 0, len(warframe.StateTypes))
+	for _, definition := range warframe.StateTypes {
+		options = append(options, stateTypeOption{Value: definition.Name, Label: definition.Label})
 	}
 	response.Success(c, options)
-}
-
-// stateTypeLabel 返回 StateType 枚举中文名（对齐 Java NAME 字段）。
-func stateTypeLabel(name string) string {
-	labels := map[string]string{
-		"ALL": "未知", "GEAR": "道具", "KEYS": "钥匙", "RESOURCES": "资源",
-		"SENTINELS": "守护/宠物", "OTHER": "加成", "MODS": "MOD", "WARFRAMES": "战甲",
-		"WEAPONS": "武器", "RELIC_BRONZE": "完整遗物", "RELIC_PLATINUM": "光辉遗物",
-		"RELIC_GOLD": "无暇遗物", "RELIC_SILVER": "优良遗物", "ENHANCERS": "赋能",
-		"SKINS": "外观", "SHIP": "采集机", "TENNO_ACCESSORY_SCARVES": "披饰",
-		"WEAPONS_TENNO_MELEE_SKIN": "武器外观", "KUBROW_PET_PATTERNS": "库狛花纹",
-		"CATBROW_PET_PATTERNS": "库娃花纹", "INFESTED_KAVAT_PET_PATTERNS": "狐帕菲拉花纹",
-		"INFESTED_PREDATORS_PET_PATTERNS": "扑猎达赛花纹", "BACKGROUNDS": "背景",
-		"CURSORS": "指针", "SOUNDS": "登录音效", "CUSTOM_UI_STYLE": "主题",
-		"ACTION_FIGURE_DIORAMAS": "景观", "COLORS": "颜色", "NOTE_PACkS": "乐器",
-		"POSE_SETS": "姿势组", "QUARTERS_WALLPAPERS": "壁纸模板", "ARCADE": "街机",
-		"EMOTES": "表情", "VIDEO_WALL_BACKDROPS": "视频墙背景",
-		"VIDEO_WALL_SOUNDSCAPES": "视频墙音景", "AVATAR_IMAGES": "浮印",
-		"SUIT_CUSTOMIZATIONS": "颜色包", "PACKAGES": "组合包",
-		"SHIP_SCENES": "轨道飞行器装饰", "BLUEPRINT": "蓝图",
-	}
-	if label, ok := labels[name]; ok {
-		return label
-	}
-	return name
 }
