@@ -387,18 +387,29 @@ func TestGetDuviriCycle(t *testing.T) {
 	}
 }
 
-// TestGetSeasonInfo 验证电波：挑战按 night_wave 表补全名称/描述/声望，|COUNT| 占位替换。
+// TestGetSeasonInfo 验证电波：挑战按 night_wave 表补全名称/描述/声望，|COUNT| 占位替换，
+// 且 daily/weekly/elite 与 Java 一致由表内 standing（1000/4500/7000）反推。
 func TestGetSeasonInfo(t *testing.T) {
 	setupWorldStateBatchDB(t)
-	if err := database.DB.Create(&modelwarframe.NightWave{
-		UniqueName: "/Lotus/Types/Challenges/NW1", Name: "击杀敌人",
-		Description: "击杀 |COUNT| 名敌人", Standing: 4500, Required: 30,
-	}).Error; err != nil {
-		t.Fatal(err)
+	for _, record := range []modelwarframe.NightWave{
+		{UniqueName: "/Lotus/Types/Challenges/NW1", Name: "击杀敌人",
+			Description: "击杀 |COUNT| 名敌人", Standing: 4500, Required: 30},
+		{UniqueName: "/Lotus/Types/Challenges/NW2", Name: "每日任务",
+			Description: "完成 |COUNT| 次任务", Standing: 1000, Required: 3},
+		{UniqueName: "/Lotus/Types/Challenges/NW3", Name: "精英任务",
+			Description: "击杀 |COUNT| 名执刑官", Standing: 7000, Required: 1},
+	} {
+		if err := database.DB.Create(&record).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
+	// 真实载荷形态：周常/精英条目不带 Weekly/Elite 标记（甚至不带 Daily）
 	raw := `{"SeasonInfo":{"Season":12,"Phase":1,"ActiveChallenges":[
-	  {"Challenge":"/Lotus/Types/Challenges/NW1","Daily":true,"Weekly":false,"Elite":true},
-	  {"Challenge":"/Lotus/Types/Challenges/Missing","Daily":false,"Weekly":true,"Elite":false}]}}`
+	  {"_id":{"$oid":"001800180000000000000239"},"Challenge":"/Lotus/Types/Challenges/NW1",
+	   "Activation":{"$date":{"$numberLong":"1785715200000"}},"Expiry":{"$date":{"$numberLong":"1786320000000"}}},
+	  {"_id":{"$oid":"001800180000000000000247"},"Daily":true,"Challenge":"/Lotus/Types/Challenges/NW2"},
+	  {"_id":{"$oid":"001800180000000000000245"},"Challenge":"/Lotus/Types/Challenges/NW3"},
+	  {"Challenge":"/Lotus/Types/Challenges/Missing","Weekly":true}]}}`
 	warframe.DefaultWorldState().SetRaw([]byte(raw))
 
 	info, err := warframe.GetSeasonInfo()
@@ -408,8 +419,8 @@ func TestGetSeasonInfo(t *testing.T) {
 	if info.Season != 12 || info.Phase != 1 {
 		t.Fatalf("赛季/阶段透传失败: %+v", info)
 	}
-	if len(info.ActiveChallenges) != 2 {
-		t.Fatalf("挑战数 = %d, 期望 2", len(info.ActiveChallenges))
+	if len(info.ActiveChallenges) != 4 {
+		t.Fatalf("挑战数 = %d, 期望 4", len(info.ActiveChallenges))
 	}
 	first := info.ActiveChallenges[0]
 	if first.Name != "击杀敌人" {
@@ -421,12 +432,21 @@ func TestGetSeasonInfo(t *testing.T) {
 	if first.Standing != "4500" {
 		t.Fatalf("声望 = %q, 期望 4500", first.Standing)
 	}
-	if !first.Daily || first.Weekly || !first.Elite {
-		t.Fatalf("标记位错误: %+v", first)
+	// standing=4500 → 周常（载荷未给标记，不能退化成「普通挑战」）
+	if first.Daily || !first.Weekly || first.Elite {
+		t.Fatalf("standing=4500 应为周常: %+v", first)
 	}
-	// 未命中 night_wave 的挑战只保留标记位
-	second := info.ActiveChallenges[1]
-	if second.Name != "" || !second.Weekly {
+	// standing=1000 → 每日
+	if daily := info.ActiveChallenges[1]; !daily.Daily || daily.Weekly || daily.Elite {
+		t.Fatalf("standing=1000 应为每日: %+v", daily)
+	}
+	// standing=7000 → 精英
+	if elite := info.ActiveChallenges[2]; elite.Daily || elite.Weekly || !elite.Elite {
+		t.Fatalf("standing=7000 应为精英: %+v", elite)
+	}
+	// 未命中 night_wave 的挑战只保留载荷标记
+	second := info.ActiveChallenges[3]
+	if second.Name != "" || second.Daily || !second.Weekly || second.Elite {
 		t.Fatalf("未命中挑战应仅保留标记: %+v", second)
 	}
 }

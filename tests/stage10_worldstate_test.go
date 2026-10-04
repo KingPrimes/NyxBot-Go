@@ -6,6 +6,7 @@ package tests
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"nyxbot-go/internal/database"
 	"nyxbot-go/internal/enum/drawplugin"
@@ -13,24 +14,32 @@ import (
 	"nyxbot-go/internal/warframe"
 )
 
+// fissureRaw 取自官方 worldState.php 的真实形态（MongoDB 扩展 JSON）：
+// 顶层键首字母大写、_id 为 {"$oid":...}、时间为 {"$date":{"$numberLong":毫秒}}。
+// 2026-08-07T10:00:00Z = 1786096800000，2026-08-07T10:35:00Z = 1786098900000。
 const fissureRaw = `{
-  "activeMissions": [
-    {"_id":"f1","Activation":"2026-08-07T10:00:00Z","Expiry":"2026-08-07T10:35:00Z",
+  "ActiveMissions": [
+    {"_id":{"$oid":"f1"},"Activation":{"$date":{"$numberLong":"1786096800000"}},
+     "Expiry":{"$date":{"$numberLong":"1786098900000"}},
      "MissionType":"MT_SURVIVAL","Modifier":"VoidT3","Node":"/Node/Abaddon",
-     "Faction":"FC_CORPUS","Region":1,"Seed":11,"Hard":false,"voidStorms":false},
-    {"_id":"f2","Activation":"2026-08-07T10:00:00Z","Expiry":"2026-08-07T10:35:00Z",
+     "Faction":"FC_CORPUS","Region":1,"Seed":11},
+    {"_id":{"$oid":"f2"},"Activation":{"$date":{"$numberLong":"1786096800000"}},
+     "Expiry":{"$date":{"$numberLong":"1786098900000"}},
      "MissionType":"MT_EXTERMINATION","Modifier":"VoidT1","Node":"/Node/Abaddon",
-     "Faction":"FC_GRINEER","Region":3,"Seed":22,"Hard":false,"voidStorms":false},
-    {"_id":"f3","Activation":"2026-08-07T10:00:00Z","Expiry":"2026-08-07T10:35:00Z",
+     "Faction":"FC_GRINEER","Region":3,"Seed":22},
+    {"_id":{"$oid":"f3"},"Activation":{"$date":{"$numberLong":"1786096800000"}},
+     "Expiry":{"$date":{"$numberLong":"1786098900000"}},
      "MissionType":"MT_CAPTURE","Modifier":"VoidT5","Node":"/Node/Milestone",
-     "Faction":"FC_GRINEER","Region":1,"Seed":33,"Hard":true,"voidStorms":false},
-    {"_id":"f4","Activation":"2026-08-07T10:00:00Z","Expiry":"2026-08-07T10:35:00Z",
+     "Faction":"FC_GRINEER","Region":1,"Seed":33,"Hard":true},
+    {"_id":{"$oid":"f4"},"Activation":{"$date":{"$numberLong":"1786096800000"}},
+     "Expiry":{"$date":{"$numberLong":"1786098900000"}},
      "MissionType":"MT_DEFENSE","Modifier":"VoidT2","Node":"/Node/Nightmare",
-     "Faction":"FC_CORPUS","Region":5,"Seed":44,"Hard":false,"voidStorms":false}
+     "Faction":"FC_CORPUS","Region":5,"Seed":44}
   ],
-  "voidStorms": [
-    {"_id":"v1","Activation":"2026-08-07T10:00:00Z","Expiry":"2026-08-07T10:35:00Z",
-     "Node":"/Node/Nightmare","Tier":"VoidT4"}
+  "VoidStorms": [
+    {"_id":{"$oid":"v1"},"Activation":{"$date":{"$numberLong":"1786096800000"}},
+     "Expiry":{"$date":{"$numberLong":"1786098900000"}},
+     "Node":"/Node/Nightmare","ActiveMissionTier":"VoidT4"}
   ]
 }`
 
@@ -50,12 +59,20 @@ func TestGetActiveMissions(t *testing.T) {
 	wantOrder := []drawplugin.VoidTier{
 		drawplugin.VoidT1, drawplugin.VoidT2, drawplugin.VoidT3,
 	}
+	wantIDs := []string{"f2", "f4", "f1"}
+	wantExpiry := time.UnixMilli(1786098900000)
 	for i := range missions {
 		if missions[i].Modifier != wantOrder[i] {
 			t.Fatalf("第 %d 项 Modifier = %v, 期望 %v", i, missions[i].Modifier, wantOrder[i])
 		}
 		if missions[i].Expiry.IsZero() {
 			t.Fatalf("第 %d 项 Expiry 解析失败", i)
+		}
+		if !missions[i].Expiry.Equal(wantExpiry) {
+			t.Fatalf("第 %d 项 Expiry = %v, 期望 %v", i, missions[i].Expiry, wantExpiry)
+		}
+		if missions[i].ID != wantIDs[i] {
+			t.Fatalf("第 %d 项 ID = %q, 期望 %q", i, missions[i].ID, wantIDs[i])
 		}
 	}
 }
@@ -112,14 +129,23 @@ func TestGetVoidStorms(t *testing.T) {
 	if !strings.Contains(m.Node, "梦魇") {
 		t.Fatalf("节点未翻译为中文, 实际 %q", m.Node)
 	}
+	// 遗物等级取自官方载荷的 ActiveMissionTier 键
+	if m.Modifier != drawplugin.VoidT4 {
+		t.Fatalf("九重天遗物等级应为 VoidT4, 实际 %v", m.Modifier)
+	}
+	if m.ID != "v1" {
+		t.Fatalf("九重天 ID 应为 v1, 实际 %q", m.ID)
+	}
 }
 
 // TestGetActiveMissionsNodeMiss 验证节点未命中时保留自建 Faction。
 func TestGetActiveMissionsNodeMiss(t *testing.T) {
 	setupStage10DB(t)
-	raw := `{"activeMissions":[{"_id":"m","Activation":"2026-08-07T10:00:00Z",
-	  "Expiry":"2026-08-07T10:35:00Z","MissionType":"MT_CAPTURE","Modifier":"VoidT1",
-	  "Node":"/Node/NoneSuch","Faction":"FC_CORPUS","Hard":false,"voidStorms":false}]}`
+	raw := `{"ActiveMissions":[{"_id":{"$oid":"m"},
+	  "Activation":{"$date":{"$numberLong":"1786096800000"}},
+	  "Expiry":{"$date":{"$numberLong":"1786098900000"}},
+	  "MissionType":"MT_CAPTURE","Modifier":"VoidT1",
+	  "Node":"/Node/NoneSuch","Faction":"FC_CORPUS"}]}`
 	warframe.DefaultWorldState().SetRaw([]byte(raw))
 
 	missions, err := warframe.GetActiveMissions(false)
@@ -212,7 +238,10 @@ func TestMissionIndexMappings(t *testing.T) {
 		100: drawplugin.MTRelay,
 	}
 	for index, want := range mapping {
-		raw := `{"voidStorms":[{"_id":"s","Activation":"2026-08-07T10:00:00Z","Expiry":"2026-08-07T10:35:00Z","Node":"/N","Tier":"VoidT1"}]}`
+		raw := `{"VoidStorms":[{"_id":{"$oid":"s"},
+		  "Activation":{"$date":{"$numberLong":"1786096800000"}},
+		  "Expiry":{"$date":{"$numberLong":"1786098900000"}},
+		  "Node":"/N","ActiveMissionTier":"VoidT1"}]}`
 		warframe.DefaultWorldState().SetRaw([]byte(raw))
 		if err := database.DB.Delete(&modelwarframe.Nodes{}, "unique_name = ?", "/N").Error; err != nil {
 			t.Fatal(err)

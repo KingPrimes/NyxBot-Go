@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"nyxbot-go/internal/logging"
 	"nyxbot-go/internal/response"
+
+	"github.com/gin-gonic/gin"
 )
 
 // logSearchParams /api/logs 搜索、统计、导出共用的过滤参数（query 传参），
@@ -178,10 +179,14 @@ func exportLogsTxt(c *gin.Context) {
 
 	var buf strings.Builder
 	buf.WriteString("# 日志导出\n")
-	buf.WriteString("# 导出时间: " + time.Now().Format("Mon Jan 02 15:04:05 MST 2006") + "\n")
+	buf.WriteString("# 导出时间: ")
+	buf.WriteString(time.Now().Format("Mon Jan 02 15:04:05 MST 2006"))
+	buf.WriteString("\n")
 	fmt.Fprintf(&buf, "# 总条数: %d\n", len(logs))
 	fmt.Fprintf(&buf, "# 过滤条件: keyword=%s, levels=%s\n", params.keyword, formatLevelsForExport(params.levels))
-	buf.WriteString("# " + strings.Repeat("=", 80) + "\n\n")
+	buf.WriteString("# ")
+	buf.WriteString(strings.Repeat("=", 80))
+	buf.WriteString("\n\n")
 	for _, entry := range logs {
 		dto := toLogSSEData(entry)
 		fmt.Fprintf(&buf, "%s %s [%s] %s : %s\n", dto.Live, dto.Time, dto.Thread, dto.Pack, dto.Log)

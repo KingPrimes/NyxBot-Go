@@ -3,8 +3,9 @@
 // 对齐 Java：
 //   - 双衍轮换 WorldStateUtils.getDuvalierCycle + translateDuvalierCycle（情绪本地计算，
 //     选项取自 WorldState.EndlessXpSchedule 的 CategoryChoices，钢铁项按 weapons 表英文名译中文）
-//   - 电波 WorldStateUtils.getSeasonInfo（Challenge 关联 night_wave 表取名称/描述/声望；
-//     daily/weekly/elite 标记直接来自 WorldState 载荷，night_wave 表无对应列）
+//   - 电波 WorldStateUtils.getSeasonInfo（Challenge 关联 night_wave 表取名称/描述/声望/次数，
+//     daily/weekly/elite 由表内 standing 反推——对齐 Java NightWave.isDailyTasks 等，
+//     真实载荷只有 Daily 标记，周常/精英必须靠 standing 判定）
 //   - 1999 日历 WorldStateUtils.getKnownCalendarSeasons（Days 的 day 为一年中第几天，
 //     换算为月/日并按月分组；事件字段按类型查 state_translation）
 package warframe
@@ -129,13 +130,21 @@ type wsSeasonInfo struct {
 }
 
 // wsActiveChallenge 对齐 Java SeasonInfo.ActiveChallenges 的 JSON 字段。
-// daily/weekly/elite 由载荷直接给出（night_wave 表只存名称/描述/声望/次数）。
+// 注意：真实载荷只有部分条目带 Daily 标记，**没有** Weekly/Elite；
+// 三者最终都以 night_wave 表的 standing 反推（见 challengeFlagsByStanding）。
 type wsActiveChallenge struct {
 	Challenge string `json:"Challenge"`
 	Daily     bool   `json:"Daily"`
 	Weekly    bool   `json:"Weekly"`
 	Elite     bool   `json:"Elite"`
 }
+
+// 电波挑战类型判定的声望基准（对齐 Java NightWave.isDailyTasks/isWeeklyTasks/isEliteMissions）。
+const (
+	nightWaveStandingDaily  = 1000
+	nightWaveStandingWeekly = 4500
+	nightWaveStandingElite  = 7000
+)
 
 // GetSeasonInfo 解析电波（对齐 Java WorldStateUtils.getSeasonInfo）：
 // 按 Challenge 关联 night_wave 表补全名称/描述/声望，标记位取自载荷。
@@ -159,7 +168,7 @@ func GetSeasonInfo() (*draw.SeasonInfo, error) {
 }
 
 // translateActiveChallenge 翻译单条电波挑战（对齐 Java getSeasonInfo 的 peek 逻辑：
-// 未命中 night_wave 表时仅保留标记位，绘制层会跳过空名称挑战）。
+// 未命中 night_wave 表时仅保留载荷标记，绘制层会跳过空名称挑战）。
 func translateActiveChallenge(challenge *wsActiveChallenge) *draw.ActiveChallenge {
 	dto := &draw.ActiveChallenge{
 		Daily:  challenge.Daily,
@@ -174,7 +183,17 @@ func translateActiveChallenge(challenge *wsActiveChallenge) *draw.ActiveChalleng
 	// 入库保留 |COUNT| 占位，展示时替换为所需次数（对齐 Java getter 行为）
 	dto.Description = strings.ReplaceAll(record.Description, "|COUNT|", strconv.Itoa(record.Required))
 	dto.Standing = strconv.Itoa(record.Standing)
+	// 类型标记以表内声望为准（对齐 Java：载荷不含周常/精英标记，若只信载荷会全部退化为「普通挑战」）
+	dto.Daily, dto.Weekly, dto.Elite = challengeFlagsByStanding(record.Standing)
 	return dto
+}
+
+// challengeFlagsByStanding 按声望值判定挑战类型（对齐 Java NightWave 的三个 isXxx 方法）。
+// 返回 (每日, 每周, 精英)。
+func challengeFlagsByStanding(standing int) (bool, bool, bool) {
+	return standing == nightWaveStandingDaily,
+		standing == nightWaveStandingWeekly,
+		standing == nightWaveStandingElite
 }
 
 // nightWaveByChallenge 按 uniqueName 查 night_wave 表（未命中返回 nil）。

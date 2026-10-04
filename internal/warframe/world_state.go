@@ -123,9 +123,10 @@ func (cache *WorldStateCache) refresh(client *http.Client) error {
 	return fmt.Errorf("fetch worldState after %d attempts: %w", statusRetryCount, lastErr)
 }
 
-// nextDelaySeconds 按最早过期时间计算下一次轮询延迟，对齐 Java calculateNextDelay。
-// 无有效过期项时返回最大间隔；连续命中最小间隔 N 次后平滑为 5 分钟。
-func (cache *WorldStateCache) nextDelaySeconds(consecutiveMin int) (int64, int) {
+// NextDelaySeconds 按缓存中最早的有效过期时间计算下一次轮询延迟（秒），
+// 对齐 Java calculateNextDelay；返回延迟与该轮之后「连续最小间隔」的计数值。
+// 无有效过期项时返回最大间隔；连续命中最小间隔 N 次后平滑为 5 分钟。供调度与测试复用。
+func (cache *WorldStateCache) NextDelaySeconds(consecutiveMin int) (int64, int) {
 	expiries := collectExpiryTimestamps(cache.Raw())
 	now := time.Now()
 	var earliest time.Time
@@ -153,65 +154,49 @@ func (cache *WorldStateCache) nextDelaySeconds(consecutiveMin int) (int64, int) 
 	return int64(delay / time.Second), 0
 }
 
-// collectExpiryTimestamps 收集 WorldState 原始 JSON 中各条目的过期时间。
-// 仅覆盖本阶段实际使用的条目类型（裂缝/入侵/警报/突击/奸商/特惠/周期等）。
+// wsExpiryProbe 采集过期时间用的最小 WorldState 视图，只声明顶层集合名。
+// 键名与官方载荷一致（首字母大写）；元素统一按 wsExpiryItem 解析 Expiry。
+type wsExpiryProbe struct {
+	Alerts            []wsExpiryItem `json:"Alerts"`
+	ActiveMissions    []wsExpiryItem `json:"ActiveMissions"`
+	Conquests         []wsExpiryItem `json:"Conquests"`
+	Descents          []wsExpiryItem `json:"Descents"`
+	DailyDeals        []wsExpiryItem `json:"DailyDeals"`
+	Invasions         []wsExpiryItem `json:"Invasions"`
+	Sorties           []wsExpiryItem `json:"Sorties"`
+	LiteSorties       []wsExpiryItem `json:"LiteSorties"`
+	VoidTraders       []wsExpiryItem `json:"VoidTraders"`
+	VoidStorms        []wsExpiryItem `json:"VoidStorms"`
+	SyndicateMissions []wsExpiryItem `json:"SyndicateMissions"`
+}
+
+// wsExpiryItem 仅含结束时间的条目视图（真实载荷为 {"$date":{"$numberLong":"毫秒"}}）。
+type wsExpiryItem struct {
+	Expiry wsTime `json:"Expiry"`
+}
+
+// collectExpiryTimestamps 收集 WorldState 原始 JSON 中各条目的过期时间
+// （对齐 Java TaskWarframeStatus.collectExpiryTimestamps 的集合范围）。
 func collectExpiryTimestamps(raw []byte) []time.Time {
 	if len(raw) == 0 {
 		return nil
 	}
-	var probe struct {
-		Fissures []struct {
-			Expiry string `json:"expiry"`
-		} `json:"fissures"`
-		Invasions []struct {
-			Expiry string `json:"expiry"`
-		} `json:"invasions"`
-		Alerts []struct {
-			Expiry string `json:"expiry"`
-		} `json:"alerts"`
-		Sorties []struct {
-			Expiry string `json:"expiry"`
-		} `json:"sorties"`
-		VoidTrader struct {
-			Expiry string `json:"expiry"`
-		} `json:"voidTrader"`
-		DailyDeals []struct {
-			Expiry string `json:"expiry"`
-		} `json:"dailyDeals"`
-		Cycles []struct {
-			Expiry string `json:"expiry"`
-		} `json:"cycles"`
-	}
+	var probe wsExpiryProbe
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil
 	}
+	groups := [][]wsExpiryItem{
+		probe.Alerts, probe.ActiveMissions, probe.Conquests, probe.Descents,
+		probe.DailyDeals, probe.Invasions, probe.Sorties, probe.LiteSorties,
+		probe.VoidTraders, probe.VoidStorms, probe.SyndicateMissions,
+	}
 	results := make([]time.Time, 0, 16)
-	appendTime := func(text string) {
-		if text == "" {
-			return
+	for _, group := range groups {
+		for i := range group {
+			if expiry := group[i].Expiry.Time(); !expiry.IsZero() {
+				results = append(results, expiry)
+			}
 		}
-		if parsed, err := time.Parse(time.RFC3339, text); err == nil {
-			results = append(results, parsed)
-		}
-	}
-	for _, item := range probe.Fissures {
-		appendTime(item.Expiry)
-	}
-	for _, item := range probe.Invasions {
-		appendTime(item.Expiry)
-	}
-	for _, item := range probe.Alerts {
-		appendTime(item.Expiry)
-	}
-	for _, item := range probe.Sorties {
-		appendTime(item.Expiry)
-	}
-	appendTime(probe.VoidTrader.Expiry)
-	for _, item := range probe.DailyDeals {
-		appendTime(item.Expiry)
-	}
-	for _, item := range probe.Cycles {
-		appendTime(item.Expiry)
 	}
 	return results
 }
@@ -244,7 +229,7 @@ func RunWorldStatePolling(ctx context.Context, client *http.Client) {
 			firstDelay = pollMaxInterval
 			continue
 		}
-		delaySeconds, nextConsecutive := cache.nextDelaySeconds(consecutiveMin)
+		delaySeconds, nextConsecutive := cache.NextDelaySeconds(consecutiveMin)
 		consecutiveMin = nextConsecutive
 		firstDelay = time.Duration(delaySeconds) * time.Second
 		logging.DebugPack("warframe.status", "next worldState poll in %v", firstDelay)

@@ -40,11 +40,11 @@ type wsAlertReward struct {
 	Items   []string `json:"items"`
 }
 
-// wsLiteSorite 对齐 Java model.LiteSorite 的 JSON 字段。
+// wsLiteSorite 对齐 Java model.worldstate.LiteSorite 的 JSON 字段。
 type wsLiteSorite struct {
-	ID       string                `json:"_id"`
+	ID       wsObjectID            `json:"_id"`
 	Boss     string                `json:"Boss"`
-	Expiry   string                `json:"Expiry"`
+	Expiry   wsTime                `json:"Expiry"`
 	Missions []wsLiteSoriteMission `json:"Missions"`
 }
 
@@ -151,9 +151,9 @@ func missionTypeName(key string) string {
 	return key
 }
 
-// remainingUntil 计算到指定 RFC3339 时间的剩余时间文本（解析失败返回空串）。
-func remainingUntil(expiry string) string {
-	parsed := parseTime(expiry)
+// remainingUntil 计算到指定时间的剩余时间文本（解析失败返回空串）。
+func remainingUntil(expiry wsTime) string {
+	parsed := expiry.Time()
 	if parsed.IsZero() {
 		return ""
 	}
@@ -162,7 +162,7 @@ func remainingUntil(expiry string) string {
 
 // remainingFrom 剩余时间文本（对齐 Java timeDeltaToString 的 "Xd Xh Xm Xs" 形态）。
 func remainingFrom(expiry time.Time) string {
-	return cycle.TimeDeltaToString(expiry.Sub(time.Now()).Milliseconds())
+	return cycle.TimeDeltaToString(time.Until(expiry).Milliseconds())
 }
 
 // parseAlertEnvelope 从默认缓存读取原始 JSON 并解析本批次的 envelope。
