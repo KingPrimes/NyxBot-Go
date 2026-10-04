@@ -41,6 +41,7 @@ func TestLoadFromGeneratesCommentedDefault(t *testing.T) {
 		"# SQLite 数据库配置",
 		"# OneBot 连接配置",
 		"# 写入日志文件的最低等级：TRACE / DEBUG / INFO / WARN / ERROR / PANIC（控制台输出全部等级）",
+		"# GORM 慢查询告警阈值（毫秒），0=默认 600；不想看慢查询告警请把 sql_level 设为 error",
 		"# JWT 签名密钥（首次启动时随机生成，请勿泄露）",
 	} {
 		if !strings.Contains(text, want) {
@@ -52,6 +53,13 @@ func TestLoadFromGeneratesCommentedDefault(t *testing.T) {
 	}
 	if loaded.Log.Level != "INFO" {
 		t.Errorf("日志文件等级默认值应为 INFO，实际: %q", loaded.Log.Level)
+	}
+	// 慢查询告警阈值默认 600ms（遗物导入的 200ms 级批量写入在其下方，不再刷告警）
+	if loaded.Log.SQLSlowMS != 600 {
+		t.Errorf("慢查询告警阈值默认值应为 600ms，实际: %d", loaded.Log.SQLSlowMS)
+	}
+	if !strings.Contains(text, "sql_slow_ms: 600") {
+		t.Errorf("生成的配置缺少 sql_slow_ms 默认值:\n%s", text)
 	}
 
 	// 注释不影响解析：写出的内容应能无损读回加载结果

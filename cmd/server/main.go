@@ -51,7 +51,7 @@ func main() {
 		ConsoleEnabled: cfg.Log.Console,
 		Level:          cfg.Log.Level,
 	})
-	database.Init(cfg.Database.Path, cfg.Log.Startup, cfg.Log.SQLLevel)
+	database.Init(cfg.Database.Path, cfg.Log.Startup, cfg.Log.SQLLevel, cfg.Log.SQLSlowMS)
 
 	serverContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

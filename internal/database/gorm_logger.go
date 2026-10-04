@@ -20,8 +20,21 @@ import (
 // gormLogPack GORM 日志统一使用的 pack 名，SSE/前端可按 pack = database.sql 过滤。
 const gormLogPack = "database.sql"
 
-// gormSlowThreshold 慢查询阈值，超过该耗时的 SQL 以 WARN 级别记录（对齐 GORM 默认 200ms）。
-const gormSlowThreshold = 200 * time.Millisecond
+// DefaultSQLSlowThreshold 慢查询告警默认阈值（对应 config.yaml 的 log.sql_slow_ms 缺省值）。
+// 600ms 而非 GORM 默认的 200ms：遗物导入的子表批量 INSERT（3002 行 / 18012 个绑定参数）
+// 实测约 200ms（纯 Go 驱动 modernc.org/sqlite 的参数绑定随参数个数超线性），
+// 用 200ms 会在每次数据更新时刷出无意义的告警。
+const DefaultSQLSlowThreshold = 600 * time.Millisecond
+
+// ParseSQLSlowThreshold 把 config.yaml 的 log.sql_slow_ms 解析为慢查询阈值：
+// <=0（字段缺失/未设置/非法）回退 DefaultSQLSlowThreshold，保证老配置文件升级后行为不突变。
+// 想完全不记慢查询请用 ParseSQLLogLevel 的 error/silent，而不是把阈值当作开关。
+func ParseSQLSlowThreshold(ms int) time.Duration {
+	if ms <= 0 {
+		return DefaultSQLSlowThreshold
+	}
+	return time.Duration(ms) * time.Millisecond
+}
 
 // gormMaxSQLLength 单条 SQL 日志的最大长度（字节）：批量 INSERT（500 行实测 58KB）与多条件 LIKE
 // 会把一条日志撑到几十 KB，挤压日志文件与 SSE 推送，超长部分截断。

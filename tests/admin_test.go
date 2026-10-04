@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"nyxbot-go/internal/database"
+	modelsystem "nyxbot-go/internal/model/system"
 )
 
 // adminCredentialsFileName 首启生成的管理员凭据文件名，固定写在可执行文件同级目录。
@@ -25,42 +28,118 @@ func closeGlobalDB(t *testing.T) {
 	database.DB = nil
 }
 
-// TestInitCreatesAdminCredentialsOnce 验证数据库初始化时的管理员引导行为：
-// 无系统用户时创建随机管理员并把凭据写入可执行文件同级的 admin-credentials.txt，
-// 再次初始化不会覆盖已存在的凭据文件。
-func TestInitCreatesAdminCredentialsOnce(t *testing.T) {
+// resetAdminCredentialsFile 删除并登记清理凭据文件，避免同进程内前序用例互相影响。
+// 测试运行时可执行文件位于 go-build 临时目录，凭据文件随之自动清理。
+func resetAdminCredentialsFile(t *testing.T) string {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 测试运行时可执行文件位于 go-build 临时目录，凭据文件随之自动清理
-	credPath := filepath.Join(filepath.Dir(exe), adminCredentialsFileName)
-	_ = os.Remove(credPath) // 清除同进程内前序测试可能留下的文件，保证独立性
-	t.Cleanup(func() { _ = os.Remove(credPath) })
+	path := filepath.Join(filepath.Dir(exe), adminCredentialsFileName)
+	_ = os.Remove(path)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	return path
+}
 
-	database.Init(filepath.Join(t.TempDir(), "test.db"), false, "silent")
-	closeGlobalDB(t) // 立即关闭连接：第二次 Init 会覆盖全局 DB，拖延关闭会导致句柄泄漏
-
-	data, err := os.ReadFile(credPath)
+// readAdminCredentials 解析凭据文件中的用户名与密码。
+func readAdminCredentials(t *testing.T, path string) (string, string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("首次初始化未生成凭据文件: %v", err)
+		t.Fatalf("读取凭据文件失败: %v", err)
 	}
-	if !strings.Contains(string(data), "username:") || !strings.Contains(string(data), "password:") {
-		t.Errorf("凭据文件内容不完整:\n%s", string(data))
+	var username, password string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if value, ok := strings.CutPrefix(line, "username: "); ok {
+			username = strings.TrimSpace(value)
+		}
+		if value, ok := strings.CutPrefix(line, "password: "); ok {
+			password = strings.TrimSpace(value)
+		}
 	}
+	if username == "" || password == "" {
+		t.Fatalf("凭据文件内容不完整:\n%s", string(raw))
+	}
+	return username, password
+}
 
-	// 篡改凭据文件后再次初始化，文件内容应保持不变
+// removeDatabaseFiles 删除 SQLite 主库文件及其可能的附属文件，模拟 data 目录被清空。
+func removeDatabaseFiles(t *testing.T, dbPath string) {
+	t.Helper()
+	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm", dbPath + "-journal"} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("删除数据库文件 %s 失败: %v", path, err)
+		}
+	}
+}
+
+// assertAdminCredentialsUsable 断言凭据文件里的账号密码能通过库中 bcrypt 哈希校验（即真的能登录）。
+func assertAdminCredentialsUsable(t *testing.T, username, password string) {
+	t.Helper()
+	var user modelsystem.SysUser
+	if err := database.DB.Where("user_name = ?", username).First(&user).Error; err != nil {
+		t.Fatalf("凭据文件中的用户名 %q 不在数据库里: %v", username, err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		t.Fatalf("凭据文件中的密码与数据库哈希不匹配: %v", err)
+	}
+}
+
+// TestInitWritesAdminCredentialsOnFreshDatabase 验证空库初始化：创建随机管理员，
+// 凭据文件里的账号密码与库中哈希一致（可用于登录）。
+func TestInitWritesAdminCredentialsOnFreshDatabase(t *testing.T) {
+	credPath := resetAdminCredentialsFile(t)
+
+	database.Init(filepath.Join(t.TempDir(), "fresh.db"), false, "silent", 0)
+	defer closeGlobalDB(t)
+
+	username, password := readAdminCredentials(t, credPath)
+	assertAdminCredentialsUsable(t, username, password)
+}
+
+// TestInitKeepsAdminCredentialsWhenUsersExist 验证库里已有系统用户时（普通重启）不覆盖凭据文件。
+func TestInitKeepsAdminCredentialsWhenUsersExist(t *testing.T) {
+	credPath := resetAdminCredentialsFile(t)
+	dbPath := filepath.Join(t.TempDir(), "existing.db")
+
+	database.Init(dbPath, false, "silent", 0)
+	closeGlobalDB(t) // 关闭后才能用同一路径再次打开
+
 	if err := os.WriteFile(credPath, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	database.Init(filepath.Join(t.TempDir(), "test2.db"), false, "silent")
-	closeGlobalDB(t)
+	database.Init(dbPath, false, "silent", 0)
+	defer closeGlobalDB(t)
 
-	data, err = os.ReadFile(credPath)
+	data, err := os.ReadFile(credPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != "keep" {
-		t.Error("再次初始化覆盖了已存在的凭据文件")
+		t.Errorf("系统中已有用户时不应覆盖凭据文件, 实际内容:\n%s", string(data))
+	}
+}
+
+// TestInitRewritesAdminCredentialsAfterDatabaseRemoved 验证 data 目录中的数据库被删除后，
+// 重新生成的管理员会覆盖旧的 admin-credentials.txt：
+// 否则文件里留下的是上一套已失效的账号密码，无法登录。
+func TestInitRewritesAdminCredentialsAfterDatabaseRemoved(t *testing.T) {
+	credPath := resetAdminCredentialsFile(t)
+	dbPath := filepath.Join(t.TempDir(), "removed.db")
+
+	database.Init(dbPath, false, "silent", 0)
+	closeGlobalDB(t)
+	staleUsername, stalePassword := readAdminCredentials(t, credPath)
+
+	// 数据库被移除，凭据文件仍在（复现 bug 场景）
+	removeDatabaseFiles(t, dbPath)
+	database.Init(dbPath, false, "silent", 0)
+	defer closeGlobalDB(t)
+
+	username, password := readAdminCredentials(t, credPath)
+	assertAdminCredentialsUsable(t, username, password)
+	if username == staleUsername && password == stalePassword {
+		t.Fatalf("库被删除后凭据文件仍是旧的账号密码: %s / %s", username, password)
 	}
 }

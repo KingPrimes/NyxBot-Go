@@ -133,7 +133,8 @@ func translateSyndicateJob(job *wsSyndicateJob) *draw.SyndicateJob {
 	return dto
 }
 
-// syndicateTranslation 按 uniqueName 查 state_translation 的名称与描述（未命中返回空串）。
+// syndicateTranslation 按 uniqueName 查 state_translation 的名称与描述。
+// 未命中（或该行没有名称）时登记到未翻译清单，并把空串返回给调用方回退原文。
 func syndicateTranslation(uniqueName string) (string, string) {
 	if uniqueName == "" || database.DB == nil {
 		return "", ""
@@ -143,8 +144,13 @@ func syndicateTranslation(uniqueName string) (string, string) {
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			logging.DebugPack("warframe.syndicate", "query state_translation %q failed: %v", uniqueName, err)
+			return "", ""
 		}
+		recordTranslationMiss(uniqueName)
 		return "", ""
+	}
+	if st.Name == "" {
+		recordTranslationMiss(uniqueName)
 	}
 	return st.Name, st.Description
 }

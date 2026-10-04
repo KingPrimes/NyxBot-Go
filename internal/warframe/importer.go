@@ -377,7 +377,7 @@ func (importer *DataImporter) ImportStateTranslation(_ context.Context) error {
 	}
 
 	// CDN state_translation.json：按 uniqueName 正则匹配 StateTypeEnum.KEY 覆盖 type（未匹配回退 RESOURCES）。
-	if cdnRaw, cdnErr := cdnFetchFile("warframe/state_translation.json"); cdnErr == nil {
+	if cdnRaw, cdnErr := cdnFileFetcher("warframe/state_translation.json"); cdnErr == nil {
 		var cdnRecords []struct {
 			UniqueName  string          `json:"uniqueName"`
 			Name        string          `json:"name"`
@@ -472,7 +472,7 @@ func extractFirstDescription(raw json.RawMessage) string {
 
 // ImportAlias 从 CDN alias.json 导入（按 cn 业务键智能更新，空数据抛错）。
 func (importer *DataImporter) ImportAlias(_ context.Context) error {
-	raw, err := cdnFetchFile("warframe/alias.json")
+	raw, err := cdnFileFetcher("warframe/alias.json")
 	if err != nil {
 		return err
 	}
@@ -508,7 +508,7 @@ func (importer *DataImporter) ImportAlias(_ context.Context) error {
 // ImportRivenTion 从 CDN market_riven_tion.json 导入（按 urlName 业务键智能更新）。
 // CDN 数据的 negative_only 等字段是字符串（如 "0"），用 flexibleNumber 兼容。
 func (importer *DataImporter) ImportRivenTion(_ context.Context) error {
-	raw, err := cdnFetchFile("warframe/market_riven_tion.json")
+	raw, err := cdnFileFetcher("warframe/market_riven_tion.json")
 	if err != nil {
 		return err
 	}
@@ -555,7 +555,7 @@ func (importer *DataImporter) ImportRivenTion(_ context.Context) error {
 
 // ImportRivenTionAlias 从 CDN market_riven_tion_alias.json 导入（按 en|cn 组合键）。
 func (importer *DataImporter) ImportRivenTionAlias(_ context.Context) error {
-	raw, err := cdnFetchFile("warframe/market_riven_tion_alias.json")
+	raw, err := cdnFileFetcher("warframe/market_riven_tion_alias.json")
 	if err != nil {
 		return err
 	}
@@ -593,50 +593,93 @@ func (importer *DataImporter) ImportRivenAnalyseTrend(_ context.Context) error {
 	return importer.computeRivenTrend(raw)
 }
 
-// ImportNodes 从 ExportRegions 导入节点。
-func (importer *DataImporter) ImportNodes(_ context.Context) error {
-	raw, err := importer.exporter.ReadExportFile("ExportRegions")
-	if err != nil || len(raw) == 0 {
-		return fmt.Errorf("ExportRegions file unavailable")
-	}
+// ParseNodesExport 解析 ExportRegions 官方导出文件为节点记录
+// （对齐 Java NodeService.initFromExportFile：取顶层 ExportRegions 数组直接映射）。
+// uniqueName 为空的条目丢弃（空主键入库只会留下永远匹配不到的垃圾行）。
+func ParseNodesExport(raw []byte) ([]modelwarframe.Nodes, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return err
+		return nil, err
 	}
-	var entries []struct {
-		UniqueName    string `json:"uniqueName"`
-		Name          string `json:"name"`
-		SystemName    string `json:"systemName"`
-		SystemIndex   int    `json:"systemIndex"`
-		NodeType      int    `json:"nodeType"`
-		MasteryReq    int    `json:"masteryReq"`
-		MissionIndex  int    `json:"missionIndex"`
-		FactionIndex  int    `json:"factionIndex"`
-		MinEnemyLevel int    `json:"minEnemyLevel"`
-		MaxEnemyLevel int    `json:"maxEnemyLevel"`
-	}
+	var entries []modelwarframe.Nodes
 	if err := json.Unmarshal(envelope["ExportRegions"], &entries); err != nil {
-		return err
+		return nil, err
 	}
+	return dropNodesWithoutKey(entries), nil
+}
+
+// ParseNodesCDN 解析 CDN warframe/nodes.json（对齐 Java NodeService.initFromCdn）：
+// 文件是裸 JSON 数组，字段与官方导出同构（社区维护的补充节点：九重天、活动节点等）。
+func ParseNodesCDN(raw []byte) ([]modelwarframe.Nodes, error) {
+	var entries []modelwarframe.Nodes
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("parse CDN nodes.json: %w", err)
+	}
+	return dropNodesWithoutKey(entries), nil
+}
+
+// dropNodesWithoutKey 过滤 uniqueName 为空的节点条目。
+func dropNodesWithoutKey(entries []modelwarframe.Nodes) []modelwarframe.Nodes {
 	records := make([]modelwarframe.Nodes, 0, len(entries))
 	for _, entry := range entries {
 		if entry.UniqueName == "" {
 			continue
 		}
-		records = append(records, modelwarframe.Nodes{
-			UniqueName:    entry.UniqueName,
-			Name:          entry.Name,
-			SystemName:    entry.SystemName,
-			SystemIndex:   entry.SystemIndex,
-			NodeType:      entry.NodeType,
-			MasteryReq:    entry.MasteryReq,
-			MissionIndex:  entry.MissionIndex,
-			FactionIndex:  entry.FactionIndex,
-			MinEnemyLevel: entry.MinEnemyLevel,
-			MaxEnemyLevel: entry.MaxEnemyLevel,
-		})
+		records = append(records, entry)
 	}
-	return batchSave(importer.db, records, false)
+	return records
+}
+
+// ImportNodes 导入星图节点：官方导出 ExportRegions + CDN warframe/nodes.json
+// （对齐 Java NodeService.initData：initFromExportFile → initFromCdn）。
+// CDN 只补官方导出没有的节点（九重天/活动节点等），不覆盖同名节点：
+// Java 用 saveAll 按主键整行覆盖，会把导出更准的字段冲掉——实测唯一重叠的 SolNode229，
+// 导出是 factionIndex=2 / 星系序号 16 / 等级 15-30，CDN 是 1 / 0 / 0-0，
+// 而 factionIndex 会用于世界状态入侵/警报的派系渲染（nodeFactionByKey），属实现缺陷，不照搬。
+// CDN 拉取/解析失败同样只告警、保留已导入的官方导出数据（Java 的 @Transactional 会连带回滚导出节点）。
+func (importer *DataImporter) ImportNodes(_ context.Context) error {
+	raw, err := importer.exporter.ReadExportFile("ExportRegions")
+	if err != nil || len(raw) == 0 {
+		return fmt.Errorf("ExportRegions file unavailable")
+	}
+	exportRecords, err := ParseNodesExport(raw)
+	if err != nil {
+		return err
+	}
+	if err := batchSave(importer.db, exportRecords, false); err != nil {
+		return err
+	}
+
+	cdnRaw, cdnErr := cdnFileFetcher("warframe/nodes.json")
+	if cdnErr != nil {
+		logging.WarnPack("warframe.import",
+			"CDN nodes.json unavailable, kept %d nodes from ExportRegions: %v", len(exportRecords), cdnErr)
+		return nil
+	}
+	cdnRecords, err := ParseNodesCDN(cdnRaw)
+	if err != nil {
+		logging.WarnPack("warframe.import",
+			"CDN nodes.json invalid, kept %d nodes from ExportRegions: %v", len(exportRecords), err)
+		return nil
+	}
+	exportKeys := make(map[string]struct{}, len(exportRecords))
+	for _, record := range exportRecords {
+		exportKeys[record.UniqueName] = struct{}{}
+	}
+	additions := make([]modelwarframe.Nodes, 0, len(cdnRecords))
+	for _, record := range cdnRecords {
+		if _, exists := exportKeys[record.UniqueName]; exists {
+			continue
+		}
+		additions = append(additions, record)
+	}
+	if err := batchSave(importer.db, additions, false); err != nil {
+		return err
+	}
+	logging.InfoPack("warframe.import",
+		"nodes imported: %d from ExportRegions, %d from CDN nodes.json (%d already in export)",
+		len(exportRecords), len(additions), len(cdnRecords)-len(additions))
+	return nil
 }
 
 // ImportWeapons 从 ExportWeapons 导入武器。
@@ -917,7 +960,7 @@ func ParseRelicExport(raw []byte) ([]modelwarframe.Relics, error) {
 // TranslateRelicRewardNames 把遗物奖励名翻译为中文（对齐 Java RelicsImportUtil.loadTranslationMap +
 // translateReward）：关键词取奖励 uniqueName 的末三段（StringUtils.getLastThreeSegments）并去重，
 // 一次性批量查询 state_translation（对齐 Java 的 OR LIKE 规格查询，避免逐条 4000+ 次单查），
-// 未命中保留原始路径并计入返回值（Java 侧会导出未翻译清单）。
+// 未命中保留原始路径并计入返回值（返回值由 ImportRelics 收集成未翻译清单导出）。
 func TranslateRelicRewardNames(relics []modelwarframe.Relics) []string {
 	keywords := make([]string, 0, 1024)
 	seen := make(map[string]bool, 1024)
@@ -979,16 +1022,27 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 	for _, record := range records {
 		rewardCount += len(record.RelicRewards)
 	}
+	// 未翻译奖励清单（对齐 Java RelicsImportUtil.exportUntranslatedItems→
+	// ./data/UntranslatedRelicsRewardsName.json）：按 uniqueName 合并进现有清单，已在文件中的不重复添加，
+	// 人工填写的译名不会被覆盖；运行期世界状态的未命中项也落在同一份文件里。
+	// 放在落库成功之后：导入失败时不该留下"待翻译"报告；写文件失败只告警，不影响已落库的数据
+	//（Java 侧此处抛 IOException 会连带回滚事务，属实现缺陷，不照搬）。
+	untranslatedItems := CollectUntranslatedItems(untranslated)
+	added, mergeErr := MergeUntranslatedItems(untranslatedItems)
+	if mergeErr != nil {
+		logging.WarnPack("warframe.import", "merge untranslated relic rewards into %s failed: %v",
+			UntranslatedListPath(), mergeErr)
+	}
 	logging.InfoPack("warframe.import",
-		"relics imported: %d relics, %d rewards, %d reward names untranslated",
-		len(records), rewardCount, len(untranslated))
+		"relics imported: %d relics, %d rewards, %d reward names untranslated (%d newly recorded in %s)",
+		len(records), rewardCount, len(untranslatedItems), added, UntranslatedListPath())
 	return nil
 }
 
 // ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 运行时替换）。
 // CDN 数据的 rarity 是字符串枚举名（如 "COMMON"），经 rarityNameToOrdinal 转 ORDINAL。
 func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
-	raw, err := cdnFetchFile("warframe/reward_pool.json")
+	raw, err := cdnFileFetcher("warframe/reward_pool.json")
 	if err != nil {
 		return err
 	}
@@ -1278,6 +1332,22 @@ func nonPercentStat(name string) bool {
 	default:
 		return false
 	}
+}
+
+// cdnFileFetcher 当前的 CDN 数据文件拉取实现（默认多 CDN 回退；黑盒测试可经
+// SetCDNFileFetcher 换成本地 httptest 服务，避免测试打真实 CDN）。
+var cdnFileFetcher = cdnFetchFile
+
+// SetCDNFileFetcher 替换进程级 CDN 数据文件拉取实现，返回原实现（供黑盒测试注入本地服务器）。
+// 传 nil 时回退默认实现。
+func SetCDNFileFetcher(fetch func(path string) ([]byte, error)) func(path string) ([]byte, error) {
+	previous := cdnFileFetcher
+	if fetch == nil {
+		cdnFileFetcher = cdnFetchFile
+		return previous
+	}
+	cdnFileFetcher = fetch
+	return previous
 }
 
 // cdnFetchFile 从 KingPrimes/DataSource 多 CDN 拉取文件（对齐 CdnTagResolver + ApiDataSourceUtils）。
