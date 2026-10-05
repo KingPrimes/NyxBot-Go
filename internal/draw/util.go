@@ -47,9 +47,10 @@ func timeDeltaString(d time.Duration) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// formatTimestamp 格式化时间戳为 "2006-01-02 15:04:05"（对齐 TimeZoneUtil.formatTimestamp）。
-func formatTimestamp(t time.Time) string {
-	return t.Format("2006-01-02 15:04:05")
+// FormatTimestamp 格式化时间戳为 "2006-01-02 15:04:05"，先转换到本地时区
+// （对齐 Java TimeZoneUtil.formatTimestamp 取系统时区；API 时间为 UTC，直接 Format 会差一个时区偏移）。
+func FormatTimestamp(t time.Time) string {
+	return t.In(time.Local).Format("2006-01-02 15:04:05")
 }
 
 // factionOrder 派系匹配顺序（对齐 Java FactionEnum 声明顺序）。

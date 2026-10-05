@@ -109,6 +109,25 @@ func TestDrawArbitrationImage(t *testing.T) {
 	assertPNG(t, "draw_arbitration_notworth.png", data)
 }
 
+// TestFormatTimestampLocalTimeZone 验证时间文本按本地时区渲染（对齐 Java TimeZoneUtil 取系统时区）。
+// API 时间为 UTC，若直接 Format 会与本地时间差一个时区偏移。
+func TestFormatTimestampLocalTimeZone(t *testing.T) {
+	original := time.Local
+	t.Cleanup(func() { time.Local = original })
+
+	utcNoon := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+
+	time.Local = time.UTC
+	if got := draw.FormatTimestamp(utcNoon); got != "2026-08-07 12:00:00" {
+		t.Fatalf("UTC 时区: got %q, want %q", got, "2026-08-07 12:00:00")
+	}
+
+	time.Local = time.FixedZone("CST", 8*3600)
+	if got := draw.FormatTimestamp(utcNoon); got != "2026-08-07 20:00:00" {
+		t.Fatalf("UTC+8 时区: got %q, want %q", got, "2026-08-07 20:00:00")
+	}
+}
+
 // TestDrawArbitrationsImage 值得参与的仲裁列表图。
 func TestDrawArbitrationsImage(t *testing.T) {
 	base := now()

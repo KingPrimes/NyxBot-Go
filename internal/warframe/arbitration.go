@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,26 +31,36 @@ const (
 
 // Arbitration 仲裁条目，对齐 Java draw-image-plugin 的 Arbitration 模型。
 type Arbitration struct {
-	ID         string `json:"id"`         // 仲裁 ID
-	Activation string `json:"activation"` // 开始时间（RFC3339）
-	Expiry     string `json:"expiry"`     // 结束时间（RFC3339）
-	Node       string `json:"node"`       // 节点
-	Planet     string `json:"planet"`     // 行星
-	Enemy      string `json:"enemy"`      // 敌人派系
-	EnemyLv    int    `json:"enemyLv"`    // 敌人等级
-	Type       string `json:"type"`       // 任务类型
-	IsArchon   bool   `json:"isArchon"`   // 是否执刑官猎
-	IsWorth    bool   `json:"isWorth"`    // 是否值得（有奖励）
+	ID         string `json:"id"`          // 仲裁 ID 为开始时间的时间戳（Unix 秒）
+	Activation string `json:"activation"`  // 开始时间（RFC3339，UTC）
+	Expiry     string `json:"expiry"`      // 结束时间（RFC3339，UTC）
+	Node       string `json:"node"`        // 节点
+	Planet     string `json:"planet"`      // 行星（API 未返回，保留字段对齐 Java 模型）
+	Enemy      string `json:"enemy"`       // 敌人派系
+	Type       string `json:"missionType"` // 任务类型（API 字段名为 missionType）
 }
 
-// activationTime 解析开始时间；失败返回零值。
-func (arb *Arbitration) activationTime() time.Time {
-	parsed, _ := time.Parse(time.RFC3339, arb.Activation)
-	return parsed
+// IsWorth 判断仲裁是否值得参与（对齐 Java Arbitration.isWorth：类型/节点/敌人三重匹配）。
+func (arb Arbitration) IsWorth() bool {
+	isType := strings.Contains(arb.Type, "拦截") || strings.Contains(arb.Type, "防御")
+	isNode := strings.Contains(arb.Node, "谷神星") || strings.Contains(arb.Node, "水星")
+	isEnemy := strings.Contains(arb.Enemy, "Grin") || strings.Contains(arb.Enemy, "Infest")
+	return isType && isNode && isEnemy
+}
+
+// activationTime 解析开始时间：优先 activation（RFC3339），缺失或非法时回退 ID（Unix 秒时间戳）；均失败返回零值。
+func (arb Arbitration) activationTime() time.Time {
+	if parsed, err := time.Parse(time.RFC3339, arb.Activation); err == nil {
+		return parsed
+	}
+	if seconds, err := strconv.ParseInt(arb.ID, 10, 64); err == nil {
+		return time.Unix(seconds, 0)
+	}
+	return time.Time{}
 }
 
 // expiryTime 解析结束时间；失败返回零值。
-func (arb *Arbitration) expiryTime() time.Time {
+func (arb Arbitration) expiryTime() time.Time {
 	parsed, _ := time.Parse(time.RFC3339, arb.Expiry)
 	return parsed
 }
@@ -71,7 +83,7 @@ func NewArbitrationCache(client *http.Client) *ArbitrationCache {
 // Init 启动时恢复仲裁数据：优先从文件恢复，文件无效则从 API 获取（对齐 Java init）。
 func (cache *ArbitrationCache) Init() error {
 	fromFile := cache.loadFromFile()
-	if len(fromFile) > 0 && hasValidArbitration(fromFile) {
+	if hasUsableArbitration(fromFile) {
 		cache.setMemoryCache(pruneArbitration(fromFile))
 		logging.InfoPack("warframe.arbitration", "arbitration restored from file (%d entries)", len(cache.snapshot()))
 		return nil
@@ -123,7 +135,7 @@ func (cache *ArbitrationCache) GetArbitrationList() []Arbitration {
 	now := time.Now()
 	results := make([]Arbitration, 0, arbitrationListLimit)
 	for _, arb := range list {
-		if !arb.IsWorth {
+		if !arb.IsWorth() {
 			continue
 		}
 		if arb.activationTime().After(now) {
@@ -172,6 +184,20 @@ func hasValidArbitration(list []Arbitration) bool {
 	now := time.Now()
 	for _, arb := range list {
 		if arb.expiryTime().After(now) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasUsableArbitration 判断列表是否可用：存在未过期条目，且至少一条的任务类型非空。
+// 旧版缓存文件因 JSON 字段名错误（API 为 missionType）导致类型全空，此处视为坏数据触发重新拉取。
+func hasUsableArbitration(list []Arbitration) bool {
+	if !hasValidArbitration(list) {
+		return false
+	}
+	for _, arb := range list {
+		if arb.Type != "" {
 			return true
 		}
 	}
