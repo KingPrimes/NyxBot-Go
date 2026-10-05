@@ -3,19 +3,18 @@
 package warframe
 
 import (
-	"time"
-
 	"nyxbot-go/internal/draw"
 	"nyxbot-go/internal/enum/drawplugin"
 	modelwarframe "nyxbot-go/internal/model/warframe"
 )
 
 // ArbitrationToDraw 将仲裁领域数据转为绘图 DTO。
-// 仲裁 API（node/planet/enemy/type）本身返回中文，无需翻译。
+// 仲裁 API（node/planet/enemy/missionType）本身返回中文，无需翻译。
+// 时间走 activationTime（含 ID 时间戳兜底）/expiryTime，与缓存过滤逻辑保持一致。
 func ArbitrationToDraw(arb Arbitration) *draw.Arbitration {
 	return &draw.Arbitration{
-		Activation: parseRFC3339(arb.Activation),
-		Expiry:     parseRFC3339(arb.Expiry),
+		Activation: arb.activationTime(),
+		Expiry:     arb.expiryTime(),
 		ID:         arb.ID,
 		Node:       arb.Node,
 		Planet:     arb.Planet,
@@ -55,10 +54,4 @@ func rarityFromOrdinal(ordinal int) drawplugin.Rarity {
 	default:
 		return drawplugin.RarityCommon
 	}
-}
-
-// parseRFC3339 解析 RFC3339 时间；失败返回零值。
-func parseRFC3339(text string) time.Time {
-	parsed, _ := time.Parse(time.RFC3339, text)
-	return parsed
 }

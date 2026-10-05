@@ -39,9 +39,9 @@ func (a *Arbitration) enemyName() string {
 	return a.enemyInfo().Name
 }
 
-// activationFormat 开始时间文本。
+// activationFormat 开始时间文本（本地时区）。
 func (a *Arbitration) activationFormat() string {
-	return formatTimestamp(a.Activation)
+	return FormatTimestamp(a.Activation)
 }
 
 // timeLeft 剩余时间文本。

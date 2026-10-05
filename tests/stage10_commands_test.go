@@ -3,7 +3,9 @@
 package tests
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -54,8 +56,6 @@ func TestArbitrationToDraw(t *testing.T) {
 		Planet:     "谷神星",
 		Enemy:      "Grineer",
 		Type:       "拦截",
-		EnemyLv:    100,
-		IsWorth:    true,
 	}
 	dto := warframe.ArbitrationToDraw(arb)
 	if dto == nil {
@@ -74,6 +74,70 @@ func TestArbitrationToDraw(t *testing.T) {
 	bad := warframe.ArbitrationToDraw(warframe.Arbitration{Activation: "not-a-time", Expiry: ""})
 	if !bad.Activation.IsZero() {
 		t.Fatalf("invalid activation should be zero, got %v", bad.Activation)
+	}
+}
+
+// TestArbitrationJSONFields 验证仲裁 API 原始 JSON 字段映射（任务类型为 missionType，ID 即开始时间戳）。
+func TestArbitrationJSONFields(t *testing.T) {
+	const raw = `[{"id":"1762261200","activation":"2025-11-04T13:00:00.000Z","startString":"-24m -54s",` +
+		`"expiry":"2025-11-04T14:00:00.000Z","node":"Gabii (谷神星)","missionType":"生存",` +
+		`"enemy":"Infestation","eta":"36m 6s","bounds":{"resourceBonus":0.35}}]`
+	var list []warframe.Arbitration
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expect 1 entry, got %d", len(list))
+	}
+	arb := list[0]
+	if arb.Type != "生存" {
+		t.Fatalf("missionType 未映射到 Type: %q", arb.Type)
+	}
+	if arb.Node != "Gabii (谷神星)" || arb.Enemy != "Infestation" {
+		t.Fatalf("node/enemy 映射异常: %+v", arb)
+	}
+	// 用户约定：ID 就是任务开始的时间戳（Unix 秒），应与 activation 一致
+	activation, err := time.Parse(time.RFC3339, arb.Activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strconv.FormatInt(activation.Unix(), 10) != arb.ID {
+		t.Fatalf("id %q 与 activation %v 不一致", arb.ID, activation)
+	}
+}
+
+// TestArbitrationIsWorth 验证「值得参与」判断（对齐 Java Arbitration.isWorth 三重匹配）。
+func TestArbitrationIsWorth(t *testing.T) {
+	cases := []struct {
+		name string
+		arb  warframe.Arbitration
+		want bool
+	}{
+		{"拦截+谷神星+Grineer", warframe.Arbitration{Type: "拦截", Node: "Stöfler (谷神星)", Enemy: "Grineer"}, true},
+		{"防御+水星+Infestation", warframe.Arbitration{Type: "防御", Node: "Sinai (水星)", Enemy: "Infestation"}, true},
+		{"生存不算", warframe.Arbitration{Type: "生存", Node: "Gabii (谷神星)", Enemy: "Infestation"}, false},
+		{"非谷神星/水星不算", warframe.Arbitration{Type: "防御", Node: "Coba (地球)", Enemy: "Infestation"}, false},
+		{"Corpus 不算", warframe.Arbitration{Type: "防御", Node: "Sinai (水星)", Enemy: "Corpus"}, false},
+		{"任务类型为空不算", warframe.Arbitration{Node: "Stöfler (谷神星)", Enemy: "Grineer"}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.arb.IsWorth(); got != tc.want {
+			t.Errorf("%s: IsWorth()=%v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestArbitrationActivationFallbackToID 验证 activation 非法时回退 ID（Unix 秒时间戳）。
+func TestArbitrationActivationFallbackToID(t *testing.T) {
+	base := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	arb := warframe.Arbitration{
+		ID:         strconv.FormatInt(base.Unix(), 10),
+		Activation: "not-a-time",
+		Expiry:     base.Add(time.Hour).Format(time.RFC3339),
+	}
+	dto := warframe.ArbitrationToDraw(arb)
+	if !dto.Activation.Equal(base) {
+		t.Fatalf("activation 应回退为 ID 时间戳 %v, got %v", base, dto.Activation)
 	}
 }
 
