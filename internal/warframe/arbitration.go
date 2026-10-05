@@ -80,7 +80,8 @@ func NewArbitrationCache(client *http.Client) *ArbitrationCache {
 	return &ArbitrationCache{client: client}
 }
 
-// Init 启动时恢复仲裁数据：优先从文件恢复，文件无效则从 API 获取（对齐 Java init）。
+// Init 启动时恢复仲裁数据：优先从文件恢复，文件不可用（条目全部过期、或旧版类型全空的坏缓存）
+// 则从 API 获取（对齐 Java init）。
 func (cache *ArbitrationCache) Init() error {
 	fromFile := cache.loadFromFile()
 	if hasUsableArbitration(fromFile) {
@@ -157,11 +158,11 @@ func (cache *ArbitrationCache) snapshot() []Arbitration {
 
 // load 三级回退读取：内存 → 文件 → API。
 func (cache *ArbitrationCache) load() []Arbitration {
-	if cached := cache.snapshot(); hasValidArbitration(cached) {
+	if cached := cache.snapshot(); hasUsableArbitration(cached) {
 		return cached
 	}
 	fromFile := cache.loadFromFile()
-	if hasValidArbitration(fromFile) {
+	if hasUsableArbitration(fromFile) {
 		pruned := pruneArbitration(fromFile)
 		cache.setMemoryCache(pruned)
 		return pruned
@@ -179,24 +180,12 @@ func (cache *ArbitrationCache) setMemoryCache(list []Arbitration) {
 	cache.mu.Unlock()
 }
 
-// hasValidArbitration 判断列表是否包含未过期条目。
-func hasValidArbitration(list []Arbitration) bool {
-	now := time.Now()
-	for _, arb := range list {
-		if arb.expiryTime().After(now) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasUsableArbitration 判断列表是否可用：存在未过期条目，且至少一条的任务类型非空。
-// 旧版缓存文件因 JSON 字段名错误（API 为 missionType）导致类型全空，此处视为坏数据触发重新拉取。
+// hasUsableArbitration 判断列表裁剪后是否仍有可用数据：至少一条未过期且任务类型非空。
+// 在 pruneArbitration 的保留集上检查，避免「未过期但类型为空」与「类型非空但会被裁掉」
+// 分别通过两个条件而误判为可用。旧版缓存文件因 JSON 字段名错误（API 为 missionType）
+// 导致类型全空，此处视为坏数据，调用方据此触发重新拉取。
 func hasUsableArbitration(list []Arbitration) bool {
-	if !hasValidArbitration(list) {
-		return false
-	}
-	for _, arb := range list {
+	for _, arb := range pruneArbitration(list) {
 		if arb.Type != "" {
 			return true
 		}
