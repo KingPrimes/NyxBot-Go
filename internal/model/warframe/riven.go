@@ -63,7 +63,7 @@ type RivenAnalyseTrend struct {
 	ID       uint    `gorm:"primaryKey" json:"id"`            // 主键（自增）
 	Archwing float64 `gorm:"column:archwing" json:"archwing"` // 空战武器倾向
 	Melle    float64 `gorm:"column:melle" json:"melle"`       // 近战倾向（对齐 Java 拼写 melle）
-	Name     string  `gorm:"column:name" json:"name"`         // 武器名
+	Name     string  `gorm:"column:name" json:"name"`         // 词条效果名（如「暴击几率」，导入时由 tagToTrendName 生成）
 	Pistol   float64 `gorm:"column:pistol" json:"pistol"`     // 手枪倾向
 	Prefix   string  `gorm:"column:prefix" json:"prefix"`     // 前缀
 	Rifle    float64 `gorm:"column:rifle" json:"rifle"`       // 步枪倾向
