@@ -1177,6 +1177,8 @@ func (importer *DataImporter) computeRivenTrend(raw []byte) error {
 		Rarity         string `json:"rarity"`
 		UpgradeEntries []struct {
 			Tag           string `json:"tag"`
+			PrefixTag     string `json:"prefixTag"`
+			SuffixTag     string `json:"suffixTag"`
 			UpgradeValues []struct {
 				Value float64 `json:"value"`
 			} `json:"upgradeValues"`
@@ -1210,7 +1212,11 @@ func (importer *DataImporter) computeRivenTrend(raw []byte) error {
 			}
 			acc := accumulators[trendName]
 			if acc == nil {
-				acc = &trendAccumulator{prefix: "-", suffix: "-"}
+				// 前缀/后缀取该词条首个条目的值（对齐 Java computeIfAbsent + capitalize）
+				acc = &trendAccumulator{
+					prefix: capitalizeFirst(upgrade.PrefixTag),
+					suffix: capitalizeFirst(upgrade.SuffixTag),
+				}
 				accumulators[trendName] = acc
 			}
 			value := coefficient * 9000
@@ -1255,7 +1261,21 @@ func (importer *DataImporter) computeRivenTrend(raw []byte) error {
 			Archwing: acc.archwing,
 		})
 	}
+	// 全量替换：先清空历史数据（旧版 tag 映射错误时导入的残缺词条、重复导入累积的行）。
+	// 对齐项目内遗物导入的「清空 + 重写」模式；Java 侧为按 name 智能 upsert，效果等同。
+	if err := importer.db.Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Delete(&modelwarframe.RivenAnalyseTrend{}).Error; err != nil {
+		return fmt.Errorf("clear riven analyse trend: %w", err)
+	}
 	return batchSave(importer.db, records, false)
+}
+
+// capitalizeFirst 首字母大写；空串返回 "-"（对齐 Java RivenTrendGenerator.capitalize）。
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // detectWeaponCategory 识别武器类别（对齐 RivenTrendGenerator 的 uniqueName 规则）。
@@ -1280,46 +1300,48 @@ func detectWeaponCategory(uniqueName string) string {
 	}
 }
 
-// tagToTrendName 41 条 tag -> 中文词条名映射（对齐 RivenTrendGenerator 的 TAG_TO_TREND）。
+// tagToTrendName 36 条 tag -> 中文词条名映射，逐条对齐 RivenTrendGenerator 的 TAG_TO_TREND
+// 与真实 ExportUpgrades 的 tag 命名（注意易错点：元素伤害是 WeaponFreezeDamageMod /
+// WeaponElectricityDamageMod / WeaponFireDamageMod / WeaponToxinDamageMod，
+// 派系词条无 Mod 后缀且拼 Grineer（非 Griner），穿甲为 WeaponArmorPiercingDamageMod）。
 func tagToTrendName(tag string) string {
 	names := map[string]string{
-		"WeaponDamageAmountMod":                  "伤害",
-		"WeaponMeleeDamageAmountMod":             "近战伤害",
-		"WeaponCritChanceMod":                    "暴击几率",
-		"WeaponCritDamageMod":                    "暴击伤害",
-		"WeaponFireRateMod":                      "射速",
-		"WeaponMeleeAttackSpeedMod":              "攻击速度",
-		"WeaponFireIterationsMod":                "多重射击",
-		"WeaponProcTimeMod":                      "触发时间",
-		"WeaponStunChanceMod":                    "触发几率",
-		"WeaponDamageColdMod":                    "冰元素伤害",
-		"WeaponDamageElectricityMod":             "电元素伤害",
-		"WeaponDamageHeatMod":                    "火元素伤害",
-		"WeaponDamageToxinMod":                   "毒元素伤害",
-		"WeaponDamageImpactMod":                  "冲击伤害",
-		"WeaponDamagePunctureMod":                "穿刺伤害",
-		"WeaponDamageSlashMod":                   "切割伤害",
-		"WeaponAmmoMaxMod":                       "弹药最大值",
-		"WeaponClipMaxMod":                       "弹匣容量",
-		"WeaponRecoilReductionMod":               "后坐力",
-		"WeaponReloadSpeedMod":                   "装填速度",
-		"WeaponProjectileSpeedMod":               "投射物飞行速度",
-		"WeaponPunctureDepthMod":                 "穿透",
-		"WeaponZoomFovMod":                       "变焦",
-		"WeaponFactionDamageGrinerMod":           "对Grineer伤害",
-		"WeaponFactionDamageCorpusMod":           "对Corpus伤害",
-		"WeaponFactionDamageInfestationMod":      "对Infested伤害",
-		"WeaponMeleeFactionDamageGrinerMod":      "对Grineer伤害",
-		"WeaponMeleeFactionDamageCorpusMod":      "对Corpus伤害",
-		"WeaponMeleeFactionDamageInfestationMod": "对Infested伤害",
-		"WeaponMeleeRangeIncMod":                 "攻击范围",
-		"WeaponMeleeFinisherDamageMod":           "处决伤害",
-		"WeaponMeleeComboEfficiencyMod":          "重击效率",
-		"WeaponMeleeComboInitialBonusMod":        "初始连击",
-		"WeaponMeleeComboPointsOnHitMod":         "额外连击数几率",
-		"WeaponMeleeComboBonusOnHitMod":          "几率不获得连击数",
-		"ComboDurationMod":                       "连击持续时间",
-		"SlideAttackCritChanceMod":               "滑行攻击暴击几率",
+		"WeaponDamageAmountMod":             "伤害/近战伤害",
+		"WeaponMeleeDamageMod":              "伤害/近战伤害",
+		"WeaponCritChanceMod":               "暴击几率",
+		"WeaponCritDamageMod":               "暴击伤害",
+		"WeaponFireRateMod":                 "射速/攻击速度",
+		"WeaponFireIterationsMod":           "多重射击",
+		"WeaponProcTimeMod":                 "触发时间",
+		"WeaponStunChanceMod":               "触发几率",
+		"WeaponElectricityDamageMod":        "电击伤害",
+		"WeaponFireDamageMod":               "火焰伤害",
+		"WeaponFreezeDamageMod":             "冰冻伤害",
+		"WeaponToxinDamageMod":              "毒素伤害",
+		"WeaponImpactDamageMod":             "冲击伤害",
+		"WeaponSlashDamageMod":              "切割伤害",
+		"WeaponArmorPiercingDamageMod":      "穿刺伤害",
+		"WeaponAmmoMaxMod":                  "弹药最大值",
+		"WeaponClipMaxMod":                  "弹匣容量",
+		"WeaponRecoilReductionMod":          "后坐力",
+		"WeaponReloadSpeedMod":              "装填速度",
+		"WeaponProjectileSpeedMod":          "投射物飞行速度",
+		"WeaponPunctureDepthMod":            "穿透",
+		"WeaponZoomFovMod":                  "变焦",
+		"WeaponFactionDamageCorpus":         "对Corpus伤害",
+		"WeaponFactionDamageGrineer":        "对Grineer伤害",
+		"WeaponFactionDamageInfested":       "对Infested伤害",
+		"WeaponMeleeFactionDamageCorpus":    "对Corpus伤害",
+		"WeaponMeleeFactionDamageGrineer":   "对Grineer伤害",
+		"WeaponMeleeFactionDamageInfested":  "对Infested伤害",
+		"WeaponMeleeRangeIncMod":            "攻击范围",
+		"WeaponMeleeFinisherDamageMod":      "处决伤害",
+		"WeaponMeleeComboEfficiencyMod":     "重击效率",
+		"WeaponMeleeComboInitialBonusMod":   "初始连击",
+		"WeaponMeleeComboPointsOnHitMod":    "额外连击数几率",
+		"WeaponMeleeComboBonusOnHitMod":     "几率不获得连击数",
+		"ComboDurationMod":                  "连击持续时间",
+		"SlideAttackCritChanceMod":          "滑行攻击暴击几率",
 	}
 	return names[tag]
 }

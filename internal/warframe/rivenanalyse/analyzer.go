@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"nyxbot-go/internal/draw"
+	"nyxbot-go/internal/logging"
 	modelwarframe "nyxbot-go/internal/model/warframe"
 )
 
@@ -48,6 +49,8 @@ func analyzeWeapon(_ *Calculator, weapon *modelwarframe.Weapons, model *draw.Riv
 			attr.LethalLevel = calcLethalLevel(cat, attr.Name, weapon)
 		}
 		attr.Analysis = buildAnalysis(attr)
+		logging.DebugPack("riven", "武器 %q 词条 %q 分析：比率=%s 评分=%s 致命度=%s",
+			weapon.Name, attr.Name, attr.Ratio, attr.Grade, attr.LethalLevel)
 	}
 }
 

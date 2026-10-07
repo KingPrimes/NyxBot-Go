@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"nyxbot-go/internal/draw"
+	"nyxbot-go/internal/logging"
 	modelwarframe "nyxbot-go/internal/model/warframe"
 )
 
@@ -46,10 +47,17 @@ type parsedRiven struct {
 // （对齐 Java ocrRivenCompute 的单图流程 + setAttributeNumber）。
 func (c *Calculator) Analyse(rawLines []string) []*draw.RivenAnalyseTrend {
 	lines := cleanLines(rawLines)
+	logging.DebugPack("riven", "OCR 清洗：%d 行 → %d 行：%v", len(rawLines), len(lines), lines)
 	if len(lines) == 0 {
 		return nil
 	}
 	p := parseRiven(lines)
+	logging.DebugPack("riven", "解析结果：武器候选=%v 紫卡名=%q 词条数=%d",
+		p.weaponsCandidates, p.rivenName, len(p.attributes))
+	for i, a := range p.attributes {
+		logging.DebugPack("riven", "词条[%d]：显示名=%q 分析名=%q 数值=%.2f 整卡带负=%v",
+			i, a.attributeName, a.name, a.attr, a.nag)
+	}
 	if len(p.weaponsCandidates) == 0 {
 		return nil
 	}
@@ -142,8 +150,10 @@ func (c *Calculator) computeAttributes(p parsedRiven) []*draw.RivenAnalyseTrend 
 	var weapons []modelwarframe.Weapons
 	for _, cand := range p.weaponsCandidates {
 		if weapons = c.findWeapons(cand); len(weapons) > 0 {
+			logging.DebugPack("riven", "武器候选 %q 命中 %d 条", cand, len(weapons))
 			break
 		}
+		logging.DebugPack("riven", "武器候选 %q 未命中，继续下一个候选", cand)
 	}
 	if len(weapons) == 0 {
 		return nil
@@ -151,6 +161,8 @@ func (c *Calculator) computeAttributes(p parsedRiven) []*draw.RivenAnalyseTrend 
 
 	sourceDisp := weapons[0].OmegaAttenuation
 	rankScale := c.estimateRankScale(p, &weapons[0])
+	logging.DebugPack("riven", "倾向基准：来源武器=%q sourceDisp=%.2f rankScale=%.4f",
+		weapons[0].Name, sourceDisp, rankScale)
 
 	models := make([]*draw.RivenAnalyseTrend, 0, len(weapons))
 	for i := range weapons {
@@ -173,6 +185,9 @@ func (c *Calculator) computeAttributes(p parsedRiven) []*draw.RivenAnalyseTrend 
 
 		for _, attr := range p.attributes {
 			trend := c.findTrendByAnalyseName(attr.name)
+			if trend == nil {
+				logging.DebugPack("riven", "词条 %q 未命中趋势表（分析名=%q），低高区间将显示为 ?", attr.attributeName, attr.name)
+			}
 
 			// 满级等效值（对齐：歧视词条按百分比线性缩放，显示值非线性）
 			scaled := attr.attr * maxEquivScale
@@ -199,6 +214,11 @@ func (c *Calculator) computeAttributes(p parsedRiven) []*draw.RivenAnalyseTrend 
 				m.LowAttr = formatAttrBound(low, isDiscrimination(attr.attributeName))
 				m.HighAttr = formatAttrBound(high, isDiscrimination(attr.attributeName))
 				m.AttrDiff = buildAttrDiff(attr.name, scaled, low, high)
+				logging.DebugPack("riven", "词条 %q：基准=%.2f 满级等效=%.2f 区间=[%s, %s] 偏差=%s",
+					attr.attributeName, baseVal, scaled, m.LowAttr, m.HighAttr, m.AttrDiff)
+			} else if trend != nil {
+				logging.DebugPack("riven", "词条 %q：类别 %q 无基准值（趋势表该列为 0）",
+					attr.attributeName, weaponCategoryNames[cat])
 			}
 
 			model.Attributes = append(model.Attributes, m)
@@ -258,8 +278,13 @@ func (c *Calculator) estimateRankScale(p parsedRiven, source *modelwarframe.Weap
 	} else {
 		median = ratios[len(ratios)/2]
 	}
-	scale := 1.0 / median
-	return math.Min(math.Max(scale, 0.9), 9.0)
+	scale := math.Min(math.Max(1.0/median, 0.9), 9.0)
+	logging.DebugPack("riven", "等级估算：ratios=%v median=%.4f → rankScale=%.4f", ratios, median, scale)
+	if scale > 2.5 {
+		// 对齐 Java 的告警；低等级紫卡（0-1 级）本身可达 8-9 倍，属正常范围
+		logging.WarnPack("riven", "紫卡缩放倍率偏大（rankScale=%.4f），请确认截图等级或 OCR 数据是否清晰", scale)
+	}
+	return scale
 }
 
 // correctionFactor 词条修正系数（对齐 Java correctionFactor；不含 grade 浮动因子 0.9~1.1）。
@@ -291,12 +316,12 @@ func correctionFactor(totalAttrs int, hasNegative, isNegativeAttr bool) float64 
 	}
 }
 
-// lowHighValueWithFactor 低/高值 = 浮动系数 × 基准值 × 倾向 × 修正系数（4 位小数，对齐 formatDouble4）。
+// lowHighValueWithFactor 低/高值 = 浮动系数 × 基准值 × 倾向 × 修正系数（2 位小数）。
 // 词条数不在 2-4 范围内时返回 0（对齐 Java getLowAttribute/getHighAttribute 的 switch 行为）。
 func lowHighValueWithFactor(baseVal, pro float64, count int, nag, isNeg bool, factor float64) float64 {
 	switch count {
 	case 2, 3, 4:
-		return round4(factor * baseVal * pro * correctionFactor(count, nag, isNeg))
+		return round2(factor * baseVal * pro * correctionFactor(count, nag, isNeg))
 	default:
 		return 0
 	}
@@ -346,7 +371,7 @@ func buildAttrDiff(name string, attr, low, high float64) string {
 		}
 	}
 	diff := abs - math.Abs(median)
-	percent := round4(((math.Abs(median) - abs) / math.Abs(median)) * 100)
+	percent := round2(((math.Abs(median) - abs) / math.Abs(median)) * 100)
 	switch {
 	case diff > 0:
 		return "+" + formatNum(math.Abs(percent)) + "%"
@@ -370,7 +395,7 @@ func formatNum(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
-// round4 四舍五入到 4 位小数（对齐 Java DoubleUtils.formatDouble4）。
-func round4(v float64) float64 {
-	return math.Round(v*10000) / 10000
+// round2 四舍五入到 2 位小数（计算结果统一保留两位小数）。
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
 }

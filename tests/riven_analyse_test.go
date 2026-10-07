@@ -144,8 +144,8 @@ func TestRivenAnalyseFormula(t *testing.T) {
 	if crit.Name != "暴击几率" {
 		t.Fatalf("首词条应为暴击几率，实际 %q", crit.Name)
 	}
-	// 暴击几率：baseVal=150, 倾向=1.35, 修正=0.99
-	if crit.LowAttr != "180.4275" || crit.HighAttr != "220.5225" {
+	// 暴击几率：baseVal=150, 倾向=1.35, 修正=0.99（结果保留两位小数）
+	if crit.LowAttr != "180.43" || crit.HighAttr != "220.52" {
 		t.Errorf("暴击几率低/高区间异常: low=%q high=%q", crit.LowAttr, crit.HighAttr)
 	}
 	// 满级等效值 ≈ 100 × rankScale(≈1.6038)
@@ -167,8 +167,8 @@ func TestRivenAnalyseFormula(t *testing.T) {
 	if reload.Name != "装填速度" {
 		t.Fatalf("次词条应为装填速度，实际 %q", reload.Name)
 	}
-	// 装填速度：baseVal=50 → low=60.1425 high=73.5075
-	if reload.LowAttr != "60.1425" || reload.HighAttr != "73.5075" {
+	// 装填速度：baseVal=50 → low=60.14 high=73.51（结果保留两位小数）
+	if reload.LowAttr != "60.14" || reload.HighAttr != "73.51" {
 		t.Errorf("装填速度低/高区间异常: low=%q high=%q", reload.LowAttr, reload.HighAttr)
 	}
 	if reload.Grade != "C" {

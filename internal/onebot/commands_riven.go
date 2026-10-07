@@ -129,7 +129,7 @@ func (registry *CommandRegistry) replyRivenAnalyse(ctx *zero.Ctx, urls []string)
 
 	calculator := rivenanalyse.NewCalculator(database.DB)
 	var models []*draw.RivenAnalyseTrend
-	for _, url := range urls {
+	for i, url := range urls {
 		img, err := downloadRivenImage(url)
 		if err != nil {
 			logging.WarnPack("onebot.riven", "下载紫卡截图失败（%s）: %v", url, err)
@@ -144,8 +144,12 @@ func (registry *CommandRegistry) replyRivenAnalyse(ctx *zero.Ctx, urls []string)
 		for _, r := range results {
 			lines = append(lines, r.Text)
 		}
-		models = append(models, calculator.Analyse(lines)...)
+		perImage := calculator.Analyse(lines)
+		logging.DebugPack("onebot.riven", "第 %d/%d 张图：OCR %d 行，分析出 %d 个武器结果",
+			i+1, len(urls), len(lines), len(perImage))
+		models = append(models, perImage...)
 	}
+	logging.DebugPack("onebot.riven", "分析汇总：%d 张图共 %d 个结果卡", len(urls), len(models))
 
 	if len(models) == 0 {
 		_ = ReplyText(ctx, "未能从截图中识别到紫卡信息：请确认截图包含清晰的武器名与属性词条（文字完整、无遮挡），重新截图后再试")
