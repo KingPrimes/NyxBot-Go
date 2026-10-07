@@ -3,6 +3,9 @@
 适用：Windows 10/11（amd64）。产物 `NyxBot.exe` 为自包含单文件（前端、字体、SQLite、onnxruntime 均已内嵌），
 **无需安装 Go、Node、运行库或 SQLite**。
 
+> 服务只监听明文 HTTP/WS，**不要把 8080 直接暴露到公网**；远程访问需 TLS 反向代理（HTTPS / `wss://`），
+> 详见 [手册的安全说明](../ai-deploy.md#5-安全说明公网部署必读)。
+
 ## 1. 下载与校验
 
 ```powershell
@@ -13,9 +16,11 @@ Invoke-WebRequest "$Base/SHA256SUMS.txt"  -OutFile C:\NyxBot\SHA256SUMS.txt
 
 (Get-FileHash C:\NyxBot\NyxBot.exe -Algorithm SHA256).Hash.ToLower()
 Select-String -Path C:\NyxBot\SHA256SUMS.txt -Pattern "NyxBot.exe"   # 两处哈希应一致
+C:\NyxBot\NyxBot.exe --version                                       # 复核实际拿到的版本
 ```
 
-> Release 为草稿制：404 说明草稿尚未发布，请让用户先发布。
+> Release 为草稿制：`releases/latest/download` 在「新版本还是草稿」时会**返回上一个已发布版本**（不是 404）。
+> 要固定版本请把 `$Base` 换成 `…/releases/download/<tag>`，并用上面的 `--version` 复核。
 
 ## 2. 首次运行（生成配置与初始管理员）
 
@@ -39,6 +44,8 @@ Invoke-RestMethod "$BASE/api/health"
 # code=200  msg=success  data.status=ok
 
 Get-Content C:\NyxBot\admin-credentials.txt        # 初始用户名/密码，登录后立即改密
+# 注意：该文件只在「库中没有任何用户」时生成；数据库已有管理员时重启不会再生成，
+#       也拿不到明文密码（库里只有 bcrypt 哈希）——请立即转存这份凭据。
 ```
 
 改密（先登录拿 token）：
@@ -81,7 +88,8 @@ Invoke-RestMethod -Method Post -Uri "$BASE/config/loading" `
 ```
 
 让 OneBot 客户端（NapCat / LLOneBot 等）以反向 WS 连接 `ws://<主机>:8080/ws/shiro`
-（配置了令牌则附加 `?access_token=<令牌>`），日志出现 `OneBot connected: <selfID>` 即接入成功。
+（配置了令牌则附加 `?access_token=<令牌>`；跨不可信网络请走 `wss://` + TLS 代理，
+否则令牌会明文过网），日志出现 `OneBot connected: <selfID>` 即接入成功。
 
 ## 5. 开机自启（任务计划程序）
 
@@ -127,7 +135,7 @@ schtasks /Run /TN "NyxBot"
 |------|------|
 | 双击后窗口一闪而过 | 在 PowerShell 里 `.\NyxBot.exe` 运行以查看报错；常见原因是目录不可写（`admin-credentials.txt` 写失败会 panic）或端口被占用 |
 | `Invoke-WebRequest` 报 SSL/TLS 错误 | 旧版 Windows PowerShell 5.1 默认协议过旧：先执行 `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`，或改用 `curl.exe -L -o NyxBot.exe <下载地址>` |
-| 启动报端口占用 | `netstat -ano | findstr :8080` 找到进程；改 `config.yaml` 的 `server.port` 或设环境变量 `APP_PORT` |
+| 启动报端口占用 | `netstat -ano \| findstr :8080` 找到进程；改 `config.yaml` 的 `server.port` 或设环境变量 `APP_PORT` |
 | 页面打不开 | 确认访问的是 `http://localhost:8080`（默认端口），且进程仍在运行 |
 | 手机/其它机器访问不到 | 检查防火墙规则与 `config.yaml` 的 `server.port`；不要只监听回环 |
 | 日志 `OCR 准备失败` | 模型下载失败（网络受限）；服务不受影响，可手动把 det/rec.onnx 放到 `data\ocr_models\` |

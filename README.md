@@ -182,6 +182,8 @@ resources/static/             # 前端构建产物（不入库，保留 .gitkeep
   只能跑在 glibc 发行版上；**Alpine/musl 不可用**（装 `libc6-compat` 也无效）。Docker 镜像因此基于 `debian:12-slim`。
 - 运行目录会生成 `config.yaml`（缺失时自动生成，**不要用空文件占位**）、`data/` 与**可执行文件同级**的
   `admin-credentials.txt`（首次启动需该目录可写，否则启动失败）。
+- Docker 下请用**目录挂载 + `-w`**（配置与数据同处一个宿主目录）；单独把 `config.yaml` 挂成文件会让
+  保存配置失败（`rename ... device or resource busy`，实测）。
 - 首次启动会联网下载约 83MB 的 OCR 模型到 `data/ocr_models`（失败不影响服务，仅紫卡 OCR 指令不可用）。
 - 默认端口 `8080`，健康检查 `GET /api/health`；改端口 / 连接模式 / WS 路径 / 令牌后需**重启进程**。
 
