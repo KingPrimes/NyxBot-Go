@@ -10,24 +10,35 @@ import (
 )
 
 // extractAsset 将内嵌资产释放到 dir 目录，返回磁盘路径。
-// 文件名携带内容哈希（前 4 字节）：内容变化会产生新文件，存在即直接复用，
-// 进程内/多进程并发安全（临时文件 + 原子重命名）。
+// 文件名携带内容哈希（前 4 字节）：内容变化会产生新文件；
+// 复用缓存前校验文件大小（防截断/损坏的缓存导致反复加载失败）；
+// 临时文件用 os.CreateTemp 唯一命名，进程内/多进程并发安全（原子重命名）。
 func extractAsset(dir, baseName string, data []byte) (string, error) {
 	sum := sha256.Sum256(data)
 	ext := filepath.Ext(baseName)
 	stem := strings.TrimSuffix(baseName, ext)
 	path := filepath.Join(dir, fmt.Sprintf("%s-%s%s", stem, hex.EncodeToString(sum[:4]), ext))
 
-	if _, err := os.Stat(path); err == nil {
+	if info, err := os.Stat(path); err == nil && info.Size() == int64(len(data)) {
 		return path, nil
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("创建缓存目录 %s: %w", dir, err)
 	}
 
-	tmp := fmt.Sprintf("%s.tmp.%d", path, os.Getpid())
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("创建临时文件: %w", err)
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
 		return "", fmt.Errorf("写入临时文件: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("关闭临时文件: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)

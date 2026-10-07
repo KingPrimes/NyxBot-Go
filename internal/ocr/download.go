@@ -69,11 +69,12 @@ func downloadFromSource(ctx context.Context, client *http.Client, dir string, sp
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	partPath := filepath.Join(dir, spec.FileName+".part")
-	f, err := os.Create(partPath)
+	// 唯一临时文件：并发下载（多进程/重复 Prepare）互不干扰，不会互相截断
+	f, err := os.CreateTemp(dir, spec.FileName+".*.part")
 	if err != nil {
 		return err
 	}
+	partPath := f.Name()
 	defer func() {
 		f.Close()
 		// 成功路径已重命名，此处对残留（失败）的 .part 做清理

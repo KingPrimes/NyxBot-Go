@@ -44,14 +44,23 @@ var modelSpecs = []ModelSpec{
 
 // SourcesFor 按下载源选项过滤模型下载源列表。
 // source 为 ""/"auto" 返回全部（ModelScope 优先、HuggingFace 回退）；
-// "modelscope"/"huggingface" 仅保留对应源；未知取值报错。
+// "modelscope"/"huggingface" 仅保留对应源（该源缺失时报错）；未知取值报错。
 func SourcesFor(spec ModelSpec, source string) ([]string, error) {
 	switch source {
 	case "", "auto":
+		if len(spec.Sources) == 0 {
+			return nil, fmt.Errorf("模型 %s 未配置下载源", spec.FileName)
+		}
 		return spec.Sources, nil
 	case "modelscope":
+		if len(spec.Sources) < 1 {
+			return nil, fmt.Errorf("模型 %s 缺少 ModelScope 下载源", spec.FileName)
+		}
 		return spec.Sources[:1], nil
 	case "huggingface":
+		if len(spec.Sources) < 2 {
+			return nil, fmt.Errorf("模型 %s 缺少 HuggingFace 下载源", spec.FileName)
+		}
 		return spec.Sources[1:], nil
 	default:
 		return nil, fmt.Errorf("未知下载源 %q（可选 auto/modelscope/huggingface）", source)

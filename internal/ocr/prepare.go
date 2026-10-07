@@ -11,14 +11,12 @@ import (
 	"nyxbot-go/internal/logging"
 )
 
-// downloadTimeout 单个模型下载的总超时（62MB 模型在慢速网络下也够用）。
-const downloadTimeout = 15 * time.Minute
-
 // 包级引擎状态：Prepare 在后台写入，Ready 供指令侧读取。
 var (
 	stateMu     sync.RWMutex
 	stateEngine *Engine // 非 nil 表示就绪
 	stateErr    error   // 准备失败的原因；nil 且 engine 为 nil 表示仍在准备
+	prepareMu   sync.Mutex // 串行化 Prepare，防止并发准备互相覆盖状态
 )
 
 // ErrNotReady 表示 OCR 引擎尚未准备完成（模型校验/下载中）。
@@ -29,6 +27,9 @@ var ErrNotReady = errors.New("OCR 引擎尚未就绪（模型校验/下载中）
 // 阻塞函数，供 go Prepare(ctx, cfg) 在启动时调用，不阻塞主流程；
 // ctx 取消（服务关闭）会中断下载。
 func Prepare(ctx context.Context, cfg Config) {
+	prepareMu.Lock()
+	defer prepareMu.Unlock()
+
 	// 重新准备：先清空旧状态；旧引擎在此销毁，避免重复准备时资源泄漏。
 	stateMu.Lock()
 	old := stateEngine
@@ -44,7 +45,11 @@ func Prepare(ctx context.Context, cfg Config) {
 		return
 	}
 
-	client := &http.Client{Timeout: downloadTimeout}
+	// 不设 Client 总超时：62MB 模型在慢速网络下可能超过任何固定总时长，
+	// 依赖请求 ctx（服务关闭）取消；ResponseHeaderTimeout 兜底"等待响应头"卡死。
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 30 * time.Second
+	client := &http.Client{Transport: transport}
 	for _, spec := range modelSpecs {
 		verifyErr := VerifyModel(cfg.ModelDir, spec)
 		if verifyErr == nil {
