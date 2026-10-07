@@ -26,6 +26,11 @@ type Config struct {
 	// BGR 训练，BGR 输入实测精度更优（平均置信度 +1.2%），并修复个别截图中
 	// 价格数字多识别字符的问题；仅当换用以 RGB 训练的模型时才需要开启。
 	UseRGB bool
+	// AutoDownload 模型缺失/损坏时自动下载（Prepare 使用）。
+	AutoDownload bool
+	// DownloadSource 模型下载源：""/"auto"=ModelScope 优先、HuggingFace 回退；
+	// 或指定 "modelscope" / "huggingface"（Prepare 使用）。
+	DownloadSource string
 }
 
 // Engine 封装 go-ocr 的 PaddleOCR 推理引擎。
