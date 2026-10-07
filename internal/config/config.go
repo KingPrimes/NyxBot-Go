@@ -17,7 +17,7 @@ import (
 	"nyxbot-go/internal/logging"
 )
 
-// Config 顶层应用配置，包含 Server、Database、Log、Bot、Auth、Warframe 六个子配置项。
+// Config 顶层应用配置，包含 Server、Database、Log、Bot、Auth、Warframe、Ocr 七个子配置项。
 // 各字段的 comment 标签是生成 config.yaml 时写入对应条目头注释的文本，
 // 新增字段必须同步填写 comment 标签，否则生成的配置文件缺少注释。
 type Config struct {
@@ -27,6 +27,7 @@ type Config struct {
 	Bot      BotConfig      `yaml:"bot" comment:"OneBot 连接配置"`
 	Auth     AuthConfig     `yaml:"auth" comment:"认证鉴权配置"`
 	Warframe WarframeConfig `yaml:"warframe" comment:"Warframe 数据层配置"`
+	Ocr      OcrConfig      `yaml:"ocr" comment:"紫卡 OCR 识别配置"`
 }
 
 // ServerConfig HTTP 服务器配置。
@@ -96,6 +97,17 @@ type WarframeConfig struct {
 	HTTPRetryBaseWaitSeconds int `yaml:"http_retry_base_wait_seconds" comment:"首次重试等待秒数（指数退避基准）"`
 	// HTTPRetryTimeoutSeconds 单次请求超时秒数。
 	HTTPRetryTimeoutSeconds int `yaml:"http_retry_timeout_seconds" comment:"单次请求超时秒数"`
+}
+
+// OcrConfig 紫卡 OCR 识别配置。
+// 模型文件（PP-OCRv6 的 det.onnx / rec.onnx）不入库，启动时后台校验，
+// 缺失或损坏且开启 AutoDownload 时按 DownloadSource 自动下载。
+type OcrConfig struct {
+	Enabled        bool   `yaml:"enabled" comment:"是否启用 OCR 识别（关闭时不校验/下载模型、不初始化引擎）"`
+	AutoDownload   bool   `yaml:"auto_download" comment:"启动时自动校验并下载缺失/损坏的模型文件"`
+	DownloadSource string `yaml:"download_source" comment:"模型下载源：auto=ModelScope 优先、HuggingFace 回退；或指定 modelscope / huggingface"`
+	ModelDir       string `yaml:"model_dir" comment:"模型文件目录（存放 det.onnx / rec.onnx）"`
+	UseRGB         bool   `yaml:"use_rgb" comment:"按 RGB 通道顺序识别（默认 false 用 BGR：PaddleOCR 模型以 BGR 训练，实测识别更优）"`
 }
 
 // listenHost 监听主机地址，固定为本机地址（0.0.0.0 表示监听全部网卡），不开放配置项。
@@ -448,6 +460,13 @@ func defaultConfig() Config {
 			HTTPRetryAttempts:        3,  // 3 次尝试（含首次），网络抖动自动重试
 			HTTPRetryBaseWaitSeconds: 1,  // 首次重试等待 1 秒，之后 2s → 4s 指数退避
 			HTTPRetryTimeoutSeconds:  15, // 单次请求 15 秒超时
+		},
+		Ocr: OcrConfig{
+			Enabled:        true,
+			AutoDownload:   true,
+			DownloadSource: "auto",
+			ModelDir:       "data/ocr_models",
+			UseRGB:         false,
 		},
 	}
 }

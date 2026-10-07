@@ -16,6 +16,7 @@ import (
 	"nyxbot-go/internal/config"
 	"nyxbot-go/internal/database"
 	"nyxbot-go/internal/logging"
+	"nyxbot-go/internal/ocr"
 	"nyxbot-go/internal/onebot"
 	"nyxbot-go/internal/server"
 	"nyxbot-go/internal/version"
@@ -74,6 +75,16 @@ func main() {
 	warframe.SetUserAgentVersion(version.Version)
 	go importer.ImportAll(serverContext)
 	go warframe.RunWorldStatePolling(serverContext, exportClient)
+
+	// 紫卡 OCR：后台校验/下载模型并初始化引擎（不阻塞主流程，就绪后经 ocr.Ready 获取）
+	if cfg.Ocr.Enabled {
+		go ocr.Prepare(serverContext, ocr.Config{
+			ModelDir:       cfg.Ocr.ModelDir,
+			UseRGB:         cfg.Ocr.UseRGB,
+			AutoDownload:   cfg.Ocr.AutoDownload,
+			DownloadSource: cfg.Ocr.DownloadSource,
+		})
+	}
 
 	r := server.NewRouter(rt, dataHandler, updater)
 	botRuntime, err := onebot.NewRuntimeFromConfig(rt, botdirectory.DefaultDirectory)
