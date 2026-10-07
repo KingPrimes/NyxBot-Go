@@ -135,7 +135,13 @@ func buildParsedAttribute(text string, nag bool) parsedAttribute {
 		a.attributeName = head + "(重击时 x2)"
 		a.name = "暴击几率（重击时 x2）"
 	case strings.Contains(text, "滑行攻击"):
-		a.attributeName = "滑行攻击暴击几率"
+		// 对齐 Java s.replaceAll("滑.*+", "滑行攻击暴击几率")：仅替换「滑」之后的部分，
+		// 保留其前段的数值前缀（如 "-13.2%"）
+		if idx := strings.Index(text, "滑"); idx > 0 {
+			a.attributeName = text[:idx] + "滑行攻击暴击几率"
+		} else {
+			a.attributeName = "滑行攻击暴击几率"
+		}
 		a.name = "滑行攻击暴击几率"
 	default:
 		a.attributeName = text
@@ -211,9 +217,14 @@ func (c *Calculator) computeAttributes(p parsedRiven) []*draw.RivenAnalyseTrend 
 				isNeg := isNegativeAttribute(attr.attributeName, attr.attr)
 				low := lowHighValueWithFactor(baseVal, omega, len(p.attributes), attr.nag, isNeg, 0.9)
 				high := lowHighValueWithFactor(baseVal, omega, len(p.attributes), attr.nag, isNeg, 1.1)
+				// 负属性（修正系数为负）时 0.9/1.1 系数的结果天然反序（0.9 反而数值更大），
+				// 统一按数值从小到大展示区间
+				if low > high {
+					low, high = high, low
+				}
 				m.LowAttr = formatAttrBound(low, isDiscrimination(attr.attributeName))
 				m.HighAttr = formatAttrBound(high, isDiscrimination(attr.attributeName))
-				m.AttrDiff = buildAttrDiff(attr.name, scaled, low, high)
+				m.AttrDiff = buildAttrDiff(attr.name, scaled, low, high, isNeg)
 				logging.DebugPack("riven", "词条 %q：基准=%.2f 满级等效=%.2f 区间=[%s, %s] 偏差=%s",
 					attr.attributeName, baseVal, scaled, m.LowAttr, m.HighAttr, m.AttrDiff)
 			} else if trend != nil {
@@ -356,7 +367,9 @@ func isFactionAttribute(name string) bool {
 }
 
 // buildAttrDiff 生成属性偏差文本（对齐 Java attrDiff + getString/getAttributeDiscriminationDiff）。
-func buildAttrDiff(name string, attr, low, high float64) string {
+// isNegative 为真时按「更强负 = 负向（-）」呈现——Java 原语义只看绝对值偏离方向，
+// 会使「负得更多」显示为 +（正向）；这里对负属性翻转方向，使颜色（+绿/-红）符合直觉。
+func buildAttrDiff(name string, attr, low, high float64, isNegative bool) string {
 	median := (low + high) / 2
 	if median == 0 {
 		return ""
@@ -371,6 +384,9 @@ func buildAttrDiff(name string, attr, low, high float64) string {
 		}
 	}
 	diff := abs - math.Abs(median)
+	if isNegative {
+		diff = -diff
+	}
 	percent := round2(((math.Abs(median) - abs) / math.Abs(median)) * 100)
 	switch {
 	case diff > 0:

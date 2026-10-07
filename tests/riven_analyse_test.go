@@ -46,12 +46,22 @@ func setupRivenDB(t *testing.T) {
 			FireRate: 1.5, TotalDamage: 400, MagazineSize: 10, ReloadTime: 2.0,
 			Description: "", OmegaAttenuation: 1.35, DamagePerShot: "[100,100,100]",
 		},
+		{
+			UniqueName: "/Lotus/Weapons/Tenno/恶狼战锤", Name: "恶狼战锤",
+			ProductCategory: 2, // Melee
+			CriticalChance:  0.30, CriticalMultiplier: 2.0, ProcChance: 0.16,
+			FireRate: 1.5, TotalDamage: 400, MagazineSize: 10, ReloadTime: 2.0,
+			Description: "", OmegaAttenuation: 1.25, DamagePerShot: "[100,100,100]",
+		},
 	}
 	trends := []modelwarframe.RivenAnalyseTrend{
 		{Name: "暴击几率", Rifle: 150},
 		{Name: "装填速度", Rifle: 50},
 		{Name: "触发时间", Rifle: 45},
 		{Name: "对Grineer伤害", Rifle: 45},
+		{Name: "暴击伤害", Melle: 90},
+		{Name: "对Corpus伤害", Melle: 45},
+		{Name: "滑行攻击暴击几率", Melle: 120},
 	}
 	if err := db.Create(&weapons).Error; err != nil {
 		t.Fatal(err)
@@ -176,6 +186,42 @@ func TestRivenAnalyseFormula(t *testing.T) {
 	if reload.Grade != "C" {
 		t.Errorf("步枪装填速度评分应为 C，实际 %q", reload.Grade)
 	}
+}
+
+// TestRivenAnalyseNegativeAttributeDisplay 负属性显示（对齐用户实际案例「-13.2%滑行攻击暴击几率」）：
+// ① 显示名保留数值前缀；② 区间按数值从小到大；③ 偏差按「更强负 = 负向（-）」呈现。
+// 测试数据刻意让暴击伤害的比率拉低中位数（scale 变大），使滑行攻击词条比中位数负得更多。
+func TestRivenAnalyseNegativeAttributeDisplay(t *testing.T) {
+	setupRivenDB(t)
+
+	lines := []string{
+		"恶狼战锤 Acri-",
+		"mantides",
+		"+10%暴击伤害",
+		"x1.06 对 Corpus 的伤害",
+		"+12.6% 触发时间",
+		"-13.2%滑行攻击暴击几率",
+	}
+	models := rivenanalyse.NewCalculator(database.DB).Analyse(lines)
+	if len(models) != 1 {
+		t.Fatalf("应产出 1 张结果卡，实际 %d", len(models))
+	}
+	m := models[0]
+	if len(m.Attributes) != 4 {
+		t.Fatalf("应收集 4 个词条，实际 %d: %+v", len(m.Attributes), m.Attributes)
+	}
+
+	slide := m.Attributes[3]
+	if slide.AttributeName != "-13.2%滑行攻击暴击几率" {
+		t.Errorf("滑行攻击词条显示名应保留数值前缀，实际 %q", slide.AttributeName)
+	}
+	if slide.LowAttr != "-123.75" || slide.HighAttr != "-101.25" {
+		t.Errorf("负属性区间异常（应为从小到大）：low=%q high=%q", slide.LowAttr, slide.HighAttr)
+	}
+	if !strings.HasPrefix(slide.AttrDiff, "-") {
+		t.Errorf("负属性偏差应呈现负向（该词条比中位数负得更多），实际 %q", slide.AttrDiff)
+	}
+	t.Logf("滑行攻击词条：显示名=%q 区间=[%s, %s] 偏差=%s", slide.AttributeName, slide.LowAttr, slide.HighAttr, slide.AttrDiff)
 }
 
 // TestRivenAnalyseNoWeapon 未识别到可匹配武器时返回空（不 panic）。
