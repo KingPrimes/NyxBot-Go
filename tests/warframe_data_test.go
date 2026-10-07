@@ -341,15 +341,15 @@ func TestSubscribeEnumsAndPagination(t *testing.T) {
 		t.Fatalf("subscribe user list mismatch: code=%d total=%d", code, page.Total)
 	}
 
-	// 删除组（级联清理用户）
+	// 删除组（对齐 Java 语义：存在关联用户时拒绝删除，不做级联）
 	recorder = doRequest(t, r, http.MethodDelete, "/data/warframe/subscribe/1", token, "")
-	if code, _ := decodeData(t, recorder); code != 200 {
-		t.Fatalf("subscribe remove: expected 200, got %d", code)
+	if code, msg := decodeMsg(t, recorder.Body.Bytes()); code == 200 {
+		t.Fatalf("存在关联用户时应拒绝删除，实际 code=%d msg=%q", code, msg)
 	}
 	var userCount int64
 	db.Model(&modelwarframe.MissionSubscribeUser{}).Count(&userCount)
-	if userCount != 0 {
-		t.Fatalf("subscribe user should cascade delete, remaining %d", userCount)
+	if userCount != 1 {
+		t.Fatalf("拒绝删除后关联用户应保留，remaining %d", userCount)
 	}
 }
 

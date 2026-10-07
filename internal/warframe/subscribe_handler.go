@@ -169,24 +169,71 @@ func (h *DataHandler) SubscribeCheckTypeList(c *gin.Context) {
 	h.pageResponse(c, total, &req.listRequest, records)
 }
 
-// SubscribeRemove 处理 DELETE /data/warframe/subscribe/:id，删除订阅组（级联用户与检查类型）。
+// SubscribeRemove 处理 DELETE /data/warframe/subscribe/:id，删除订阅组。
+// 对齐 Java SubscriptionApplicationService.deleteSubscribeGroup：不存在报「订阅组不存在」，
+// 存在关联用户时拒绝删除（不做级联，防止误删整组订阅）。
 func (h *DataHandler) SubscribeRemove(c *gin.Context) {
 	id := paramInt64(c, "id")
-	h.db.Where("sub_id = ?", id).Delete(&modelwarframe.MissionSubscribeUser{})
-	_ = h.db.Delete(&modelwarframe.MissionSubscribe{}, id).Error
+	var group modelwarframe.MissionSubscribe
+	if err := h.db.First(&group, id).Error; err != nil {
+		response.Error(c, "订阅组不存在")
+		return
+	}
+	var userCount int64
+	if err := h.db.Model(&modelwarframe.MissionSubscribeUser{}).
+		Where("sub_id = ?", id).Count(&userCount).Error; err != nil {
+		response.Error(c, "删除失败")
+		return
+	}
+	if userCount > 0 {
+		response.Error(c, "存在关联用户，无法删除订阅组")
+		return
+	}
+	if err := h.db.Delete(&modelwarframe.MissionSubscribe{}, id).Error; err != nil {
+		response.Error(c, "删除失败")
+		return
+	}
 	response.SuccessMsg(c, "删除成功", nil)
 }
 
-// SubscribeUserRemove 处理 DELETE /data/warframe/subscribe/user/:id，删除订阅用户（级联检查类型）。
+// SubscribeUserRemove 处理 DELETE /data/warframe/subscribe/user/:id，删除订阅用户。
+// 对齐 Java deleteSubscribeUser：不存在报「用户不存在」，存在关联类型时拒绝删除。
 func (h *DataHandler) SubscribeUserRemove(c *gin.Context) {
 	id := paramInt64(c, "id")
-	h.db.Where("subu_id = ?", id).Delete(&modelwarframe.MissionSubscribeUserCheckType{})
-	_ = h.db.Delete(&modelwarframe.MissionSubscribeUser{}, id).Error
+	var user modelwarframe.MissionSubscribeUser
+	if err := h.db.First(&user, id).Error; err != nil {
+		response.Error(c, "用户不存在")
+		return
+	}
+	var typeCount int64
+	if err := h.db.Model(&modelwarframe.MissionSubscribeUserCheckType{}).
+		Where("subu_id = ?", id).Count(&typeCount).Error; err != nil {
+		response.Error(c, "删除失败")
+		return
+	}
+	if typeCount > 0 {
+		response.Error(c, "存在关联类型，无法删除用户")
+		return
+	}
+	if err := h.db.Delete(&modelwarframe.MissionSubscribeUser{}, id).Error; err != nil {
+		response.Error(c, "删除失败")
+		return
+	}
 	response.SuccessMsg(c, "删除成功", nil)
 }
 
 // SubscribeCheckTypeRemove 处理 DELETE /data/warframe/subscribe/type/:id，删除单个检查类型。
+// 对齐 Java deleteCheckType：不存在报「检查类型不存在」。
 func (h *DataHandler) SubscribeCheckTypeRemove(c *gin.Context) {
-	_ = h.db.Delete(&modelwarframe.MissionSubscribeUserCheckType{}, paramInt64(c, "id")).Error
+	id := paramInt64(c, "id")
+	var checkType modelwarframe.MissionSubscribeUserCheckType
+	if err := h.db.First(&checkType, id).Error; err != nil {
+		response.Error(c, "检查类型不存在")
+		return
+	}
+	if err := h.db.Delete(&modelwarframe.MissionSubscribeUserCheckType{}, id).Error; err != nil {
+		response.Error(c, "删除失败")
+		return
+	}
 	response.SuccessMsg(c, "删除成功", nil)
 }
