@@ -48,6 +48,7 @@ func (registry *CommandRegistry) installStageCommands() {
 		nyxbot.CmdUpdateWfResMarketRiven:   registry.wfUpdateMarketRiven,
 		nyxbot.CmdUpdateWfSister:           registry.wfUpdateLichSister,
 		nyxbot.CmdUpdateWfTar:              registry.wfUpdateTranslation,
+		nyxbot.CmdWfRivenAnalyse:           registry.wfRivenAnalyse,
 	}
 	registry.mu.Lock()
 	defer registry.mu.Unlock()

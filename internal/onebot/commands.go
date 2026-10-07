@@ -62,6 +62,7 @@ func newCommandRegistry(pluginPrefixProvider func() bool) *CommandRegistry {
 	registry.handlers[nyxbot.CmdCheckVersion] = registry.systemInfo
 	registry.installStageCommands()
 	registry.registerNoticeHandlers()
+	registry.registerRivenPendingHandler()
 	return registry
 }
 
