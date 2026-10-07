@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/RomiChan/websocket v1.4.3-0.20251002072000-d3eb41798438
 	github.com/fogleman/gg v1.3.0
+	github.com/getcharzp/go-ocr v0.0.0-20260820015638-3abab59da814
 	github.com/gin-gonic/gin v1.10.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -27,8 +28,10 @@ require (
 	github.com/cloudwego/base64x v0.1.4 // indirect
 	github.com/cloudwego/iasm v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/fumiama/orbyte v0.0.0-20251002065953-3bb358367eb5 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
+	github.com/getcharzp/onnxruntime_purego v0.0.0-20260118041137-401482b32507 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
@@ -51,6 +54,7 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
+	github.com/up-zero/gotool v0.0.0-20260120011100-d685b2532b5a // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/text v0.40.0 // indirect

@@ -17,12 +17,18 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+github.com/ebitengine/purego v0.9.0 h1:mh0zpKBIXDceC63hpvPuGLiJ8ZAa3DfrFTudmfi8A4k=
+github.com/ebitengine/purego v0.9.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/fogleman/gg v1.3.0 h1:/7zJX8F6AaYQc57WQCyN9cAIz+4bCJGO9B+dyW29am8=
 github.com/fogleman/gg v1.3.0/go.mod h1:R/bRT+9gY/C5z7JzPU0zXsXHKM4/ayA+zqcVNZzPa1k=
 github.com/fumiama/orbyte v0.0.0-20251002065953-3bb358367eb5 h1:j9o0XVvdAeLwrBYMnh0SerrMc9CgNU6AGszbsvFzoc0=
 github.com/fumiama/orbyte v0.0.0-20251002065953-3bb358367eb5/go.mod h1:FOjdw7KdCbK2eH3gRPhwFNCoXKpu9sN5vPH4El/8e0c=
 github.com/gabriel-vasile/mimetype v1.4.3 h1:in2uUcidCuFcDKtdcBxlR0rJ1+fsokWf+uqxgUFjbI0=
 github.com/gabriel-vasile/mimetype v1.4.3/go.mod h1:d8uq/6HKRL6CGdk+aubisF/M5GcPfT7nKyLpA0lbSSk=
+github.com/getcharzp/go-ocr v0.0.0-20260820015638-3abab59da814 h1:v6Ze70Wf+CYGp8F83qwqWRFBBAVCS2RN1tDWEpBM858=
+github.com/getcharzp/go-ocr v0.0.0-20260820015638-3abab59da814/go.mod h1:2MBjAl0RZOpexoNRywB+yjpXd018HH3AVlV3EZBpTAE=
+github.com/getcharzp/onnxruntime_purego v0.0.0-20260118041137-401482b32507 h1:d+3aUbLHK9Nfaex6GLlIhb0R7wLHV7LkiUiy0qwU54g=
+github.com/getcharzp/onnxruntime_purego v0.0.0-20260118041137-401482b32507/go.mod h1:JxWrTrdNfR1D0HBxOQixFeC1vkLoz8HPxfBwJ2gF/rw=
 github.com/gin-contrib/sse v0.1.0 h1:Y/yl/+YNO8GZSjAhjMsSuLt29uWRFHdHYUb5lYOV9qE=
 github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm+fLHvGI=
 github.com/gin-gonic/gin v1.10.0 h1:nTuyha1TYqgedzytsKYqna+DfLos46nTv2ygFy86HFU=
@@ -107,6 +113,8 @@ github.com/ugorji/go/codec v1.2.12 h1:9LC83zGrHhuUA9l16C9AHXAqEV/2wBQ4nkvumAE65E
 github.com/ugorji/go/codec v1.2.12/go.mod h1:UNopzCgEMSXjBc6AOMqYvWC1ktqTAfzJZUZgYf6w6lg=
 github.com/ulikunitz/xz v0.5.16 h1:ld6NyySjx5lowVKwJvMRLnW5nxKX/xnpSiFYZ/Lxur0=
 github.com/ulikunitz/xz v0.5.16/go.mod h1:H9Rt/W6/Qj27PGauhQc6nfCDy7vHpzsOThBSaYDoEhw=
+github.com/up-zero/gotool v0.0.0-20260120011100-d685b2532b5a h1:pY1cxEGXD+Sri3sjG2gZ/9HUyKoUkTVwwwMJGwkSPMg=
+github.com/up-zero/gotool v0.0.0-20260120011100-d685b2532b5a/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
 github.com/wdvxdr1123/ZeroBot v1.8.2 h1:H4qNHgeYLLm3ID5T9MKnO4fI0SWWl0rFCGLCUr8u10M=
 github.com/wdvxdr1123/ZeroBot v1.8.2/go.mod h1:trueIIVRywKJa3ov4QphzVvzYzgCNrlXdf9JvPJOFW8=
 golang.org/x/arch v0.0.0-20210923205945-b76863e36670/go.mod h1:5om86z9Hs0C8fWVUuoMHwpExlXzs5Tkyp9hOrfG7pp8=
