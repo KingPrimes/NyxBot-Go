@@ -4,9 +4,11 @@
 package warframe
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"nyxbot-go/internal/enum/nyxbot"
 	modelwarframe "nyxbot-go/internal/model/warframe"
@@ -172,68 +174,110 @@ func (h *DataHandler) SubscribeCheckTypeList(c *gin.Context) {
 // SubscribeRemove 处理 DELETE /data/warframe/subscribe/:id，删除订阅组。
 // 对齐 Java SubscriptionApplicationService.deleteSubscribeGroup：不存在报「订阅组不存在」，
 // 存在关联用户时拒绝删除（不做级联，防止误删整组订阅）。
+// 存在性检查、依赖计数与删除在同一事务内完成，消除与并发订阅插入的检查-删除竞态；
+// 仅 gorm.ErrRecordNotFound 视为不存在，其余查询错误报「删除失败」（便于与数据库故障区分）。
 func (h *DataHandler) SubscribeRemove(c *gin.Context) {
 	id := paramInt64(c, "id")
-	var group modelwarframe.MissionSubscribe
-	if err := h.db.First(&group, id).Error; err != nil {
+	var (
+		notFound bool
+		conflict string
+	)
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		var group modelwarframe.MissionSubscribe
+		if err := tx.First(&group, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				notFound = true
+				return nil
+			}
+			return err
+		}
+		var userCount int64
+		if err := tx.Model(&modelwarframe.MissionSubscribeUser{}).
+			Where("sub_id = ?", id).Count(&userCount).Error; err != nil {
+			return err
+		}
+		if userCount > 0 {
+			conflict = "存在关联用户，无法删除订阅组"
+			return nil
+		}
+		return tx.Delete(&modelwarframe.MissionSubscribe{}, id).Error
+	})
+	switch {
+	case err != nil:
+		response.Error(c, "删除失败")
+	case notFound:
 		response.Error(c, "订阅组不存在")
-		return
+	case conflict != "":
+		response.Error(c, conflict)
+	default:
+		response.SuccessMsg(c, "删除成功", nil)
 	}
-	var userCount int64
-	if err := h.db.Model(&modelwarframe.MissionSubscribeUser{}).
-		Where("sub_id = ?", id).Count(&userCount).Error; err != nil {
-		response.Error(c, "删除失败")
-		return
-	}
-	if userCount > 0 {
-		response.Error(c, "存在关联用户，无法删除订阅组")
-		return
-	}
-	if err := h.db.Delete(&modelwarframe.MissionSubscribe{}, id).Error; err != nil {
-		response.Error(c, "删除失败")
-		return
-	}
-	response.SuccessMsg(c, "删除成功", nil)
 }
 
 // SubscribeUserRemove 处理 DELETE /data/warframe/subscribe/user/:id，删除订阅用户。
 // 对齐 Java deleteSubscribeUser：不存在报「用户不存在」，存在关联类型时拒绝删除。
+// 检查-删除同事务；仅 ErrRecordNotFound 视为不存在，其余错误报「删除失败」。
 func (h *DataHandler) SubscribeUserRemove(c *gin.Context) {
 	id := paramInt64(c, "id")
-	var user modelwarframe.MissionSubscribeUser
-	if err := h.db.First(&user, id).Error; err != nil {
+	var (
+		notFound bool
+		conflict string
+	)
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		var user modelwarframe.MissionSubscribeUser
+		if err := tx.First(&user, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				notFound = true
+				return nil
+			}
+			return err
+		}
+		var typeCount int64
+		if err := tx.Model(&modelwarframe.MissionSubscribeUserCheckType{}).
+			Where("subu_id = ?", id).Count(&typeCount).Error; err != nil {
+			return err
+		}
+		if typeCount > 0 {
+			conflict = "存在关联类型，无法删除用户"
+			return nil
+		}
+		return tx.Delete(&modelwarframe.MissionSubscribeUser{}, id).Error
+	})
+	switch {
+	case err != nil:
+		response.Error(c, "删除失败")
+	case notFound:
 		response.Error(c, "用户不存在")
-		return
+	case conflict != "":
+		response.Error(c, conflict)
+	default:
+		response.SuccessMsg(c, "删除成功", nil)
 	}
-	var typeCount int64
-	if err := h.db.Model(&modelwarframe.MissionSubscribeUserCheckType{}).
-		Where("subu_id = ?", id).Count(&typeCount).Error; err != nil {
-		response.Error(c, "删除失败")
-		return
-	}
-	if typeCount > 0 {
-		response.Error(c, "存在关联类型，无法删除用户")
-		return
-	}
-	if err := h.db.Delete(&modelwarframe.MissionSubscribeUser{}, id).Error; err != nil {
-		response.Error(c, "删除失败")
-		return
-	}
-	response.SuccessMsg(c, "删除成功", nil)
 }
 
 // SubscribeCheckTypeRemove 处理 DELETE /data/warframe/subscribe/type/:id，删除单个检查类型。
-// 对齐 Java deleteCheckType：不存在报「检查类型不存在」。
+// 对齐 Java deleteCheckType：不存在报「检查类型不存在」；仅 ErrRecordNotFound 视为不存在，
+// 其余查询错误报「删除失败」。
 func (h *DataHandler) SubscribeCheckTypeRemove(c *gin.Context) {
 	id := paramInt64(c, "id")
-	var checkType modelwarframe.MissionSubscribeUserCheckType
-	if err := h.db.First(&checkType, id).Error; err != nil {
-		response.Error(c, "检查类型不存在")
-		return
-	}
-	if err := h.db.Delete(&modelwarframe.MissionSubscribeUserCheckType{}, id).Error; err != nil {
+	var notFound bool
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		var checkType modelwarframe.MissionSubscribeUserCheckType
+		if err := tx.First(&checkType, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				notFound = true
+				return nil
+			}
+			return err
+		}
+		return tx.Delete(&modelwarframe.MissionSubscribeUserCheckType{}, id).Error
+	})
+	switch {
+	case err != nil:
 		response.Error(c, "删除失败")
-		return
+	case notFound:
+		response.Error(c, "检查类型不存在")
+	default:
+		response.SuccessMsg(c, "删除成功", nil)
 	}
-	response.SuccessMsg(c, "删除成功", nil)
 }
