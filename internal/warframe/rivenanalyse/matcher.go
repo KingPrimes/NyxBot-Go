@@ -18,7 +18,9 @@ var (
 	// reWeaponsNameSuffix 中文武器名 + 可选英文后缀（如「守望者 Argi-」）。
 	reWeaponsNameSuffix = regexp.MustCompile(`^[` + hanRange + `]*?&?·?[` + hanRange + `] *?[A-Za-z]*?-?[A-Za-z]*?$`)
 	// reAttribute 属性行：含数值且以中文（可带括号/英文）结尾。
-	reAttribute = regexp.MustCompile(`.[+-x]?\d+(\.\d+)?%?.?[` + hanRange + `]*?.?（?[a-zA-Z]*?.?[` + hanRange + `]+$`)
+	// 必须全匹配（对齐 Java Matcher.matches()）——否则「用3,500来循环」这类
+	// 界面提示会因子串（5 + 00 + 来循环）满足模式被误判为词条。
+	reAttribute = regexp.MustCompile(`^(?:.[+-x]?\d+(\.\d+)?%?.?[` + hanRange + `]*?.?（?[a-zA-Z]*?.?[` + hanRange + `]+)$`)
 	// reAttributeNum 数值提取（对齐 ATTRIBUTE_NUM）。
 	reAttributeNum = regexp.MustCompile(`[+-]?\d+(\.\d+)?%?`)
 	// reDiscrimination 歧视词条：x 开头的倍率格式（如「x1.06 对 Grineer 的伤害」）。

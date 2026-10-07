@@ -79,7 +79,9 @@ func TestRivenAnalyseCompute(t *testing.T) {
 		"-10.1% 触发时间",
 		"110",
 		"段位 14",
-		"会会会会计会会会", // 星级乱码：不应干扰武器匹配
+		"会会会会计会会会",     // 星级乱码：不应干扰武器匹配
+		"用3,500来循环",    // 赤毒兑换界面提示：不得因「5+00+来循环」子串被误判为词条
+		"剩余赤毒：113,172", // 同上
 	}
 	models := rivenanalyse.NewCalculator(database.DB).Analyse(lines)
 	if len(models) == 0 {
