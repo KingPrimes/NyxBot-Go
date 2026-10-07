@@ -6,6 +6,7 @@ NyxBot-Go 是 [NyxBot](https://github.com/KingPrimes/NyxBot)（Java Spring Boot�
 当前状态：阶段 1-9 已完成，阶段 10（Warframe Bot 指令）实现 22/40，阶段 11（定时任务）未开始。
 完整背景、决策、前端接口映射与逐阶段进度见 [`plans/java-to-go-migration-plan.md`](plans/java-to-go-migration-plan.md)。
 协作约定与易踩坑点见 [`AGENTS.md`](AGENTS.md)。
+部署（Docker / Linux / Windows）见 **[`docs/ai-deploy.md`](docs/ai-deploy.md)（AI 自动部署手册）**。
 
 ## 技术栈
 
@@ -163,6 +164,28 @@ resources/static/             # 前端构建产物（不入库，保留 .gitkeep
 - `temp/`：绘图测试输出的 PNG。
 - `resources/static/`、`resources/templates/`：前端构建产物（编译期由 `go:embed` 打进二进制）。
 - `cmd/server/resource.syso`：`build.ps1` / CI 生成。
+
+## 部署
+
+面向 AI Agent 与运维的全流程部署手册（含每步的命令、期望输出与失败处置）：
+**[`docs/ai-deploy.md`](docs/ai-deploy.md)**，按环境选择子文档：
+
+| 场景 | 文档 |
+|------|------|
+| Docker（推荐） | [`docs/deploy/docker.md`](docs/deploy/docker.md) |
+| Linux 裸机（systemd 托管） | [`docs/deploy/linux.md`](docs/deploy/linux.md) |
+| Windows | [`docs/deploy/windows.md`](docs/deploy/windows.md) |
+
+几条容易踩的硬约束：
+
+- Linux 产物是**动态链接** ELF（依赖 `libdl.so.2` / `libc.so.6`，源于 purego 的 `dlopen` 绑定），
+  只能跑在 glibc 发行版上；**Alpine/musl 不可用**（装 `libc6-compat` 也无效）。Docker 镜像因此基于 `debian:12-slim`。
+- 运行目录会生成 `config.yaml`（缺失时自动生成，**不要用空文件占位**）、`data/` 与**可执行文件同级**的
+  `admin-credentials.txt`（首次启动需该目录可写，否则启动失败）。
+- Docker 下请用**目录挂载 + `-w`**（配置与数据同处一个宿主目录）；单独把 `config.yaml` 挂成文件会让
+  保存配置失败（`rename ... device or resource busy`，实测）。
+- 首次启动会联网下载约 83MB 的 OCR 模型到 `data/ocr_models`（失败不影响服务，仅紫卡 OCR 指令不可用）。
+- 默认端口 `8080`，健康检查 `GET /api/health`；改端口 / 连接模式 / WS 路径 / 令牌后需**重启进程**。
 
 ## 发布
 
