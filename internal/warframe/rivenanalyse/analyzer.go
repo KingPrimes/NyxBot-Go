@@ -42,15 +42,18 @@ func analyzeWeapon(_ *Calculator, weapon *modelwarframe.Weapons, model *draw.Riv
 			attrVal = *attr.Attr
 		}
 		isNegative := isNegativeAttribute(attr.Name, attrVal)
+		// 评分/比率/致命度的分支集合为规范化词条名（如「伤害/近战伤害」），
+		// 而 attr.Name 是 OCR 原始名（如「伤害」「射速 效果加倍）」）——先规范化再传
+		analyseName := normalizeAnalyseName(attr.Name)
 
-		attr.Ratio = calcRatio(weapon, attr.Name, math.Abs(attrVal))
-		attr.Grade = calcGrade(cat, attr.Name, baseCrit, baseProc, sniper)
+		attr.Ratio = calcRatio(weapon, analyseName, math.Abs(attrVal))
+		attr.Grade = calcGrade(cat, analyseName, baseCrit, baseProc, sniper)
 		if isNegative {
-			attr.LethalLevel = calcLethalLevel(cat, attr.Name, weapon)
+			attr.LethalLevel = calcLethalLevel(cat, analyseName, weapon)
 		}
 		attr.Analysis = buildAnalysis(attr)
-		logging.DebugPack("riven", "武器 %q 词条 %q 分析：比率=%s 评分=%s 致命度=%s",
-			weapon.Name, attr.Name, attr.Ratio, attr.Grade, attr.LethalLevel)
+		logging.DebugPack("riven", "武器 %q 词条 %q（规范名 %q）分析：比率=%s 评分=%s 致命度=%s",
+			weapon.Name, attr.Name, analyseName, attr.Ratio, attr.Grade, attr.LethalLevel)
 	}
 }
 

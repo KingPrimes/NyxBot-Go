@@ -20,7 +20,9 @@ var (
 	// reAttribute 属性行：含数值且以中文（可带括号/英文）结尾。
 	// 必须全匹配（对齐 Java Matcher.matches()）——否则「用3,500来循环」这类
 	// 界面提示会因子串（5 + 00 + 来循环）满足模式被误判为词条。
-	reAttribute = regexp.MustCompile(`^(?:.[+-x]?\d+(\.\d+)?%?.?[` + hanRange + `]*?.?（?[a-zA-Z]*?.?[` + hanRange + `]+)$`)
+	// 注意 [+\-x] 的横线必须转义：未转义的 [+-x] 在字符类中表示 + 到 x 的范围
+	// （含全部数字、逗号、字母），会导致无符号数字行被误匹配。
+	reAttribute = regexp.MustCompile(`^(?:.[+\-x]?\d+(\.\d+)?%?.?[` + hanRange + `]*?.?（?[a-zA-Z]*?.?[` + hanRange + `]+)$`)
 	// reAttributeNum 数值提取（对齐 ATTRIBUTE_NUM）。
 	reAttributeNum = regexp.MustCompile(`[+-]?\d+(\.\d+)?%?`)
 	// reDiscrimination 歧视词条：x 开头的倍率格式（如「x1.06 对 Grineer 的伤害」）。
@@ -38,7 +40,8 @@ var (
 
 	// rePureNumber 整行属性数值（简化合并的兜底判定：如拆行后的「+6.5%」独立成行）。
 	// 要求带符号（+/-）、x 倍率前缀或百分号结尾——避免把价格等无符号纯数字误判为拆行数值。
-	rePureNumber = regexp.MustCompile(`^(?:[+-x]\d+(?:\.\d+)?%?|\d+(?:\.\d+)?%)$`)
+	// 横线转义为 [+\-x]：未转义的 [+-x] 是 + 到 x 的字符范围，会连「3500」也匹配。
+	rePureNumber = regexp.MustCompile(`^(?:[+\-x]\d+(?:\.\d+)?%?|\d+(?:\.\d+)?%)$`)
 )
 
 // extractChinese 提取字符串中的中文片段并拼接（对齐 getChines）。

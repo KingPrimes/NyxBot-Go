@@ -114,3 +114,16 @@ func (c *Calculator) trendByName(name string) *modelwarframe.RivenAnalyseTrend {
 	}
 	return &trend
 }
+
+// normalizeAnalyseName 按 charAnalyse 关键词映射返回规范化词条名
+// （评分/比率/致命度的分支判定使用——分支名集合均为映射目标名，如「伤害/近战伤害」；
+// OCR 原始名「伤害」「射速 效果加倍）」等不命中）。未命中任何关键词时返回原名。
+// 显示用的 AttributeName 保持原始形态，不受影响。
+func normalizeAnalyseName(name string) string {
+	for _, m := range charAnalyse {
+		if strings.Contains(name, m.keyword) {
+			return m.target
+		}
+	}
+	return name
+}

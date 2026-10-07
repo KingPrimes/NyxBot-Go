@@ -62,6 +62,8 @@ func setupRivenDB(t *testing.T) {
 		{Name: "暴击伤害", Melle: 90},
 		{Name: "对Corpus伤害", Melle: 45},
 		{Name: "滑行攻击暴击几率", Melle: 120},
+		{Name: "伤害/近战伤害", Rifle: 165},
+		{Name: "射速/攻击速度", Rifle: 60},
 	}
 	if err := db.Create(&weapons).Error; err != nil {
 		t.Fatal(err)
@@ -222,6 +224,65 @@ func TestRivenAnalyseNegativeAttributeDisplay(t *testing.T) {
 		t.Errorf("负属性偏差应呈现负向（该词条比中位数负得更多），实际 %q", slide.AttrDiff)
 	}
 	t.Logf("滑行攻击词条：显示名=%q 区间=[%s, %s] 偏差=%s", slide.AttributeName, slide.LowAttr, slide.HighAttr, slide.AttrDiff)
+}
+
+// TestRivenAnalyseNormalizedNameEvaluation 评分/比率使用规范化词条名：
+// OCR 原始名「伤害」「射速」经 charAnalyse 映射为「伤害/近战伤害」「射速/攻击速度」后
+// 命中评分分支（修复前这些核心词条的评分与比率全部输出 "-"）。显示名保持原始形态。
+func TestRivenAnalyseNormalizedNameEvaluation(t *testing.T) {
+	setupRivenDB(t)
+
+	lines := []string{"测试枪 Abc-", "def", "+100%伤害", "+150%射速"}
+	models := rivenanalyse.NewCalculator(database.DB).Analyse(lines)
+	if len(models) != 1 {
+		t.Fatalf("应产出 1 张结果卡，实际 %d", len(models))
+	}
+	m := models[0]
+	if len(m.Attributes) != 2 {
+		t.Fatalf("应收集 2 个词条，实际 %d", len(m.Attributes))
+	}
+
+	dmg := m.Attributes[0]
+	if dmg.AttributeName != "+100%伤害" {
+		t.Errorf("显示名应保持 OCR 原始形态，实际 %q", dmg.AttributeName)
+	}
+	if dmg.Grade != "B" {
+		t.Errorf("「伤害」规范化后命中「伤害/近战伤害」分支，评分应为 B，实际 %q", dmg.Grade)
+	}
+	if dmg.Ratio == "-" || dmg.Ratio == "" {
+		t.Errorf("「伤害」比率应可用（规范化名命中基值映射），实际 %q", dmg.Ratio)
+	}
+
+	fire := m.Attributes[1]
+	if fire.AttributeName != "+150%射速 效果加倍）" {
+		t.Errorf("射速词条显示名异常: %q", fire.AttributeName)
+	}
+	if fire.Grade != "C" {
+		t.Errorf("「射速」规范化后命中「射速/攻击速度」分支，评分应为 C，实际 %q", fire.Grade)
+	}
+	if fire.Ratio == "-" || fire.Ratio == "" {
+		t.Errorf("「射速」比率应可用，实际 %q", fire.Ratio)
+	}
+	t.Logf("伤害: grade=%s ratio=%s；射速: grade=%s ratio=%s", dmg.Grade, dmg.Ratio, fire.Grade, fire.Ratio)
+}
+
+// TestRivenAnalysePriceLineNotMerged 四位数价格行不得与相邻纯中文行误合并
+// （[+\-x] 字符类回归：未转义的 [+-x] 是 + 到 x 的范围，会连「1600」也匹配为带符号数值）。
+func TestRivenAnalysePriceLineNotMerged(t *testing.T) {
+	setupRivenDB(t)
+
+	// 「守望者」与「1600」相邻：修复前会被合并为「1600守望者」导致武器候选丢失
+	lines := []string{"守望者", "1600", "+50%暴击几率", "+30%装填速度"}
+	models := rivenanalyse.NewCalculator(database.DB).Analyse(lines)
+	if len(models) != 1 {
+		t.Fatalf("应产出 1 张结果卡（价格行不得干扰武器匹配），实际 %d", len(models))
+	}
+	if models[0].WeaponName != "守望者" {
+		t.Fatalf("武器名应为守望者，实际 %q", models[0].WeaponName)
+	}
+	if len(models[0].Attributes) != 2 {
+		t.Fatalf("应收集 2 个词条（价格行不得计入），实际 %d: %+v", len(models[0].Attributes), models[0].Attributes)
+	}
 }
 
 // TestRivenAnalyseNoWeapon 未识别到可匹配武器时返回空（不 panic）。

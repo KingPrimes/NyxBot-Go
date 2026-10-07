@@ -1261,13 +1261,16 @@ func (importer *DataImporter) computeRivenTrend(raw []byte) error {
 			Archwing: acc.archwing,
 		})
 	}
-	// 全量替换：先清空历史数据（旧版 tag 映射错误时导入的残缺词条、重复导入累积的行）。
-	// 对齐项目内遗物导入的「清空 + 重写」模式；Java 侧为按 name 智能 upsert，效果等同。
-	if err := importer.db.Session(&gorm.Session{AllowGlobalUpdate: true}).
-		Delete(&modelwarframe.RivenAnalyseTrend{}).Error; err != nil {
-		return fmt.Errorf("clear riven analyse trend: %w", err)
-	}
-	return batchSave(importer.db, records, false)
+	// 全量替换：清空 + 重写放在同一事务——写入失败时回滚，避免旧数据已删、
+	// 新数据残缺导致紫卡分析区间退化为 ?（对齐项目内遗物导入的「清空 + 重写」模式；
+	// Java 侧为按 name 智能 upsert，效果等同）。
+	return importer.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).
+			Delete(&modelwarframe.RivenAnalyseTrend{}).Error; err != nil {
+			return fmt.Errorf("clear riven analyse trend: %w", err)
+		}
+		return batchSave(tx, records, false)
+	})
 }
 
 // capitalizeFirst 首字母大写；空串返回 "-"（对齐 Java RivenTrendGenerator.capitalize）。
