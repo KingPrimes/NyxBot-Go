@@ -54,18 +54,15 @@ func splitLines(text string) []string {
 	return strings.Split(text, "\n")
 }
 
-// PathTail 渲染前处理路径文本：不含空格且含 "/" 时取最后一个 "/" 之后的内容
-// （如 /Lotus/Types/Gameplay/Eidolon/Jobs/Narmer/AssassinateBountyAss → AssassinateBountyAss）；
-// 含空格的普通文本（正常译文的句子）原样返回，避免误截。
+// PathTail 渲染前处理路径文本：以 "/" 开头且不含空格的文本视为资源路径，
+// 取最后一个 "/" 之后的内容（如 /Lotus/Types/Gameplay/Eidolon/Jobs/Narmer/AssassinateBountyAss
+// → AssassinateBountyAss）；普通文本原样返回——含 "/" 的译名（如真实库中的「红/白/蓝」）
+// 与含空格的句子都不能按路径截断。
 func PathTail(text string) string {
-	if text == "" || strings.ContainsAny(text, " \t") {
+	if !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \t") {
 		return text
 	}
-	index := strings.LastIndex(text, "/")
-	if index < 0 {
-		return text
-	}
-	return text[index+1:]
+	return text[strings.LastIndex(text, "/")+1:]
 }
 
 // wrapText 按最大宽度自动换行（逐字符累积，超宽回退，对齐 Java TextUtils.wrapText）。

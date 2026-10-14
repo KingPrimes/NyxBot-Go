@@ -33,13 +33,15 @@ func TestFormatSyndicateReward(t *testing.T) {
 	}
 }
 
-// TestPathTail 路径文本渲染前取尾段；含空格的正常译文不受影响。
+// TestPathTail 路径文本渲染前取尾段；含 "/" 的译名与含空格的正常译文不受影响。
 func TestPathTail(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/Lotus/Types/Gameplay/Eidolon/Jobs/Narmer/AssassinateBountyAss", "AssassinateBountyAss"},
 		{"/Lotus/StoreItems/Types/Items/MiscItems/Forma", "Forma"},
 		{"完成日历任务", "完成日历任务"},
 		{"使用近战武器击杀200名科腐者敌人。", "使用近战武器击杀200名科腐者敌人。"},
+		{"红/白/蓝", "红/白/蓝"}, // 含 "/" 的译名（真实库存在，如调色板）不能按路径截断
+		{"A/B", "A/B"},     // 不以 "/" 开头的文本不是资源路径
 		{"", ""},
 	}
 	for _, c := range cases {

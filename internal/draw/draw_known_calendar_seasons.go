@@ -260,7 +260,7 @@ func calendarSeasonColor(month int) color.RGBA {
 }
 
 // calendarEventDesc 事件类型 → 标签前缀 + 名称与事件色（对齐 Java getEventDesc 与事件色）。
-// 路径原文（无空格含 /）说明该名称未翻译，渲染前取尾段（与赏金卡片同一工具）。
+// 路径原文（以 / 开头且无空格）说明该名称未翻译，渲染前取尾段（与赏金卡片同一工具）。
 func calendarEventDesc(ev *CalendarEvent) (string, color.RGBA) {
 	var label, name string
 	var col color.RGBA
