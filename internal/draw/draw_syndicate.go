@@ -5,6 +5,7 @@ package draw
 import (
 	"image/color"
 	"strconv"
+	"strings"
 
 	"nyxbot-go/internal/enum/drawplugin"
 )
@@ -92,7 +93,7 @@ func drawSyndicateNodesView(sm *SyndicateMission) []byte {
 	y := imageMarginT + imageTitleH + 50
 	for _, n := range nodes {
 		canvas.SetColor(textColor).SetFontSize(24)
-		canvas.AddCenteredText("• "+n, float64(y))
+		canvas.AddCenteredText("• "+PathTail(n), float64(y))
 		y += 50
 	}
 
@@ -202,17 +203,24 @@ func drawSyndicateJobCard(canvas *Canvas, job *SyndicateJob, cardX, cardY, cardW
 	canvas.SetColor(border).SetStroke(5).DrawRoundRect(float64(cardX), float64(cardY), float64(cardW), float64(cardHeight), 15)
 
 	y := cardY + 30
-	typeText := job.Type
-	if typeText == "" {
-		typeText = "未知任务"
+	// 名称：左对齐主色大字（层级感：名称 > 信息行 > 描述），路径原文取尾段
+	name := PathTail(job.Type)
+	if name == "" {
+		name = "未知任务"
 	}
+	canvas.SetColor(titleColor).SetFontSize(22)
+	canvas.AddText(name, float64(cardX+20), float64(y))
+	// 特殊标识紧随名称，沿用边框强调色
+	tag := ""
 	if job.IsVault {
-		typeText += " [保险库]"
+		tag = " [保险库]"
 	} else if job.Endless {
-		typeText += " [无尽]"
+		tag = " [无尽]"
 	}
-	canvas.SetColor(titleColor).SetFontSize(20)
-	canvas.AddText(typeText, float64(cardX+(cardW-int(canvas.StringWidth(typeText)))/2), float64(y))
+	if tag != "" {
+		canvas.SetColor(border).SetFontSize(22)
+		canvas.AddText(tag, float64(cardX+20)+canvas.StringWidth(name), float64(y))
+	}
 	y += 40
 
 	// 敌人等级
@@ -229,10 +237,10 @@ func drawSyndicateJobCard(canvas *Canvas, job *SyndicateJob, cardX, cardY, cardW
 		y += 30
 	}
 
-	// 任务描述（自动换行）
+	// 任务描述（层级感：次要灰、自动换行；路径原文取尾段）
 	if job.Desc != "" {
-		canvas.SetColor(textColor).SetFontSize(18)
-		for _, line := range wrapText(canvas, job.Desc, float64(cardW-40)) {
+		canvas.SetColor(textSecondaryColor).SetFontSize(18)
+		for _, line := range wrapText(canvas, PathTail(job.Desc), float64(cardW-40)) {
 			canvas.AddText(line, float64(cardX+20), float64(y))
 			y += 25
 		}
@@ -246,7 +254,7 @@ func drawSyndicateJobCard(canvas *Canvas, job *SyndicateJob, cardX, cardY, cardW
 		y += 25
 		for _, r := range job.Rewards {
 			canvas.SetColor(syndicateRarityColor(r.Rarity)).SetFontSize(18)
-			canvas.AddText("  • "+r.Item+" x"+strconv.Itoa(r.ItemCount), float64(cardX+20), float64(y))
+			canvas.AddText("  • "+FormatSyndicateReward(PathTail(r.Item), r.ItemCount), float64(cardX+20), float64(y))
 			y += 25
 		}
 	}
@@ -263,7 +271,7 @@ func calcSyndicateCardHeight(job *SyndicateJob, textMaxW int) int {
 		height += 30
 	}
 	if job.Desc != "" {
-		height += syndicateTextLines(job.Desc, textMaxW)*25 + 10
+		height += syndicateTextLines(PathTail(job.Desc), textMaxW)*25 + 10
 	}
 	height += 30 // 奖励标题
 	height += len(job.Rewards) * 25
@@ -314,4 +322,36 @@ func syndicateXP(job *SyndicateJob) int {
 		total += xp
 	}
 	return total
+}
+
+// FormatSyndicateReward 组装赏金奖励的显示文本（渲染时替换 |COUNT| 占位并避免数量重复）：
+//   - 名称含 |COUNT|（重导后的原始模板形态）→ 替换为数量，不再追加；
+//   - 名称已内嵌与数量一致的数字（前缀「50 …」「300…」或结尾「X 5」）→ 原样返回；
+//   - 其余 → 追加 " x数量"（含 x1，保持现行显示）。
+func FormatSyndicateReward(item string, count int) string {
+	if strings.Contains(item, "|COUNT|") {
+		return strings.ReplaceAll(item, "|COUNT|", strconv.Itoa(count))
+	}
+	if syndicateRewardHasCount(item, count) {
+		return item
+	}
+	return item + " x" + strconv.Itoa(count)
+}
+
+// syndicateRewardHasCount 判断名称是否已内嵌与数量一致的数字：
+// 结尾「X N」（真实库普查仅单空格大写 X 形态）或开头为数量数字（允许千分位逗号；
+// 如「50 内融核心」「300内融核心」；「1,500 现金匣」的数量是 1 而前缀是 1,500，不算内嵌）。
+func syndicateRewardHasCount(item string, count int) bool {
+	number := strconv.Itoa(count)
+	if strings.HasSuffix(item, "X "+number) {
+		return true
+	}
+	digits := 0
+	for digits < len(item) && (item[digits] >= '0' && item[digits] <= '9' || item[digits] == ',') {
+		digits++
+	}
+	if digits == 0 {
+		return false
+	}
+	return strings.ReplaceAll(item[:digits], ",", "") == number
 }
