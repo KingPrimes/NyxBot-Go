@@ -1039,7 +1039,8 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 	return nil
 }
 
-// ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 运行时替换）。
+// ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 占位入库保留原始模板，
+// 渲染与序列化时替换——对齐 Java Reward.getItem() 与 NightWave 既有范式）。
 // CDN 数据的 rarity 是字符串枚举名（如 "COMMON"），经 rarityNameToOrdinal 转 ORDINAL。
 func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 	raw, err := cdnFileFetcher("warframe/reward_pool.json")
@@ -1069,11 +1070,10 @@ func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 			if id == "" {
 				id = fmt.Sprintf("%s-%s", record.UniqueName, reward.Item)
 			}
-			item := strings.ReplaceAll(reward.Item, "|COUNT|", fmt.Sprintf("%d", reward.ItemCount))
 			rewards = append(rewards, modelwarframe.Reward{
 				ID:        id,
 				PoolID:    record.UniqueName,
-				Item:      item,
+				Item:      reward.Item, // 保留 |COUNT| 原始模板，展示/序列化时替换
 				Rarity:    rarityNameToOrdinal(reward.Rarity),
 				ItemCount: reward.ItemCount,
 			})

@@ -6,6 +6,8 @@ package warframe
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 // RewardPool 奖励池条目。uniqueName 为字符串主键。
@@ -21,11 +23,12 @@ func (RewardPool) TableName() string {
 
 // Reward 奖励池内奖励项。id 为 UUID 字符串主键。
 // Rarity 数据库列存 RarityEnum ORDINAL 序数，JSON 输出枚举名（对齐 Jackson）。
+// Item 入库保留含 |COUNT| 的原始模板，JSON 输出时替换为 ItemCount（对齐 Java Reward.getItem()）。
 // JSON 字段对齐前端 Api.LocalData.Reward。
 type Reward struct {
 	ID        string `gorm:"primaryKey" json:"id"`               // 主键（UUID）
 	PoolID    string `gorm:"column:pool_id" json:"-"`            // 所属奖励池外键（不输出）
-	Item      string `gorm:"column:item" json:"item"`            // 奖励名称
+	Item      string `gorm:"column:item" json:"item"`            // 奖励名称（含 |COUNT| 占位原始模板）
 	Rarity    int    `gorm:"column:rarity" json:"-"`             // 稀有度（RarityEnum ORDINAL，JSON 由 MarshalJSON 输出枚举名）
 	ItemCount int    `gorm:"column:item_count" json:"itemCount"` // 数量
 }
@@ -34,10 +37,12 @@ func (Reward) TableName() string {
 	return "reward"
 }
 
-// MarshalJSON 输出 rarity 为枚举名字符串（对齐 Jackson 枚举序列化）。
+// MarshalJSON 输出 rarity 为枚举名字符串（对齐 Jackson 枚举序列化），
+// 并将 item 中的 |COUNT| 占位替换为 itemCount（对齐 Java Reward.getItem()：入库保留原始模板，序列化时展开）。
 func (record Reward) MarshalJSON() ([]byte, error) {
 	type plain Reward
 	aliased := plain(record)
+	aliased.Item = strings.ReplaceAll(record.Item, "|COUNT|", strconv.Itoa(record.ItemCount))
 	return json.Marshal(struct {
 		plain
 		Rarity string `json:"rarity"`
