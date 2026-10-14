@@ -5,6 +5,8 @@ package warframe
 import (
 	"errors"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -23,7 +25,7 @@ func TranslateNode(nodeKey string) string {
 	var node modelwarframe.Nodes
 	if err := database.DB.Where("unique_name = ?", nodeKey).First(&node).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			logging.DebugPack("warframe.translate", "query node %q failed: %v", nodeKey, err)
+			warnTranslationQueryError("node", nodeKey, err)
 			return nodeKey
 		}
 		recordTranslationMiss(nodeKey)
@@ -43,12 +45,17 @@ func TranslateNode(nodeKey string) string {
 // TranslateStateName 将物品唯一标识翻译为中文名（对齐 Java StateTranslationService.getName：
 // 先按 StringUtils.getLastThreeSegments 截取末三段，再用 StateTranslationRepository.findByUniqueName
 // 的后缀语义查询 state_translation）。
-// 未命中时回退原文并登记到未翻译清单，供后续补翻译。
+// 未命中时回退原文并登记到未翻译清单，供后续补翻译；查询故障时只回退原文（不登记，
+// 走限频告警），避免数据库故障期间把整套原始数据写进未翻译清单。
 func TranslateStateName(uniqueName string) string {
 	if uniqueName == "" {
 		return uniqueName
 	}
-	if name := TranslateStateNameSuffix(getLastThreeSegments(uniqueName)); name != "" {
+	name, err := translateStateNameSuffix(getLastThreeSegments(uniqueName))
+	if err != nil {
+		return uniqueName
+	}
+	if name != "" {
 		return name
 	}
 	recordTranslationMiss(uniqueName)
@@ -57,12 +64,17 @@ func TranslateStateName(uniqueName string) string {
 
 // TranslateStateNameDirect 按原始 uniqueName 查 state_translation（不做 last3 段截取），
 // 同样使用 Java 的后缀语义。用于 Java 侧直接 findByUniqueName(完整路径) 的场景：
-// 警报奖励物品、1999 日历事件字段等。未命中时回退原文并登记到未翻译清单。
+// 警报奖励物品、1999 日历事件字段等。未命中时回退原文并登记到未翻译清单；
+// 查询故障时只回退原文（不登记，走限频告警）。
 func TranslateStateNameDirect(uniqueName string) string {
 	if uniqueName == "" {
 		return uniqueName
 	}
-	if name := TranslateStateNameSuffix(uniqueName); name != "" {
+	name, err := translateStateNameSuffix(uniqueName)
+	if err != nil {
+		return uniqueName
+	}
+	if name != "" {
 		return name
 	}
 	recordTranslationMiss(uniqueName)
@@ -79,12 +91,46 @@ func recordTranslationMiss(uniqueName string) {
 	RecordUntranslated(uniqueName)
 }
 
+// translationQueryWarnWindow 翻译查询故障的告警限频窗口：窗口内只告警一次，其余降级为 Debug，
+// 避免数据库故障期间每次翻译都刷屏。可经 SetTranslationQueryWarnWindow 调整。
+var translationQueryWarnWindow = time.Minute
+
+// translationQueryWarnAt 上次告警时间（Unix 纳秒；0 表示尚未告警或已重置）。
+var translationQueryWarnAt atomic.Int64
+
+// SetTranslationQueryWarnWindow 设置翻译查询故障的告警限频窗口并重置限频状态，返回原窗口
+// （供测试与工具使用）。窗口 <= 0 表示不限频（每次失败都告警）。
+func SetTranslationQueryWarnWindow(window time.Duration) time.Duration {
+	previous := translationQueryWarnWindow
+	translationQueryWarnWindow = window
+	translationQueryWarnAt.Store(0)
+	return previous
+}
+
+// warnTranslationQueryError 记录一次翻译查询故障（区别于「缺译名」：这是数据库/查询失败，
+// 调用方会回退原文且不登记未翻译清单）。告警走全局日志管线（控制台 / 轮转文件 / api logs / SSE）；
+// 同一限频窗口内只告警一次，其余写入 Debug。
+func warnTranslationQueryError(query string, key string, err error) {
+	message := "query %s %q failed, translation falls back to raw (database failure, not a missing translation): %v"
+	if translationQueryWarnWindow <= 0 {
+		logging.WarnPack("warframe.translate", message, query, key, err)
+		return
+	}
+	now := time.Now().UnixNano()
+	last := translationQueryWarnAt.Load()
+	if now-last >= int64(translationQueryWarnWindow) && translationQueryWarnAt.CompareAndSwap(last, now) {
+		logging.WarnPack("warframe.translate", message, query, key, err)
+		return
+	}
+	logging.DebugPack("warframe.translate", "query %s %q failed: %v", query, key, err)
+}
+
 // FindStateTranslationExact 按完整 uniqueName 等值（主键）查 state_translation，返回整行记录。
 // 用于表内确实以完整路径存储 unique_name 的场景（如赏金的 jobType / locationTag：
 // 实测主键等值比 LIKE 后缀快 179×，见 plans/state-translation-lookup-plan.md）。
 // 命中返回 (记录, true)；未命中返回 (零值, false) 并登记到未翻译清单，由调用方回退原文。
 // 未命中是常态（业务回退原值），因此用 Limit(1).Find 而非 First，不产生 ErrRecordNotFound 错误路径；
-// 查询本身出错（非未命中）只记 Debug 日志，不登记未翻译清单（避免把查询故障当成缺译名）。
+// 查询本身出错（非未命中）走限频告警（与缺译名区分），不登记未翻译清单。
 func FindStateTranslationExact(uniqueName string) (modelwarframe.StateTranslation, bool) {
 	if uniqueName == "" || database.DB == nil {
 		return modelwarframe.StateTranslation{}, false
@@ -95,7 +141,7 @@ func FindStateTranslationExact(uniqueName string) (modelwarframe.StateTranslatio
 		Limit(1).
 		Find(&record).Error
 	if err != nil {
-		logging.DebugPack("warframe.translate", "query state_translation %q failed: %v", uniqueName, err)
+		warnTranslationQueryError("state_translation", uniqueName, err)
 		return modelwarframe.StateTranslation{}, false
 	}
 	if record.UniqueName == "" {
@@ -110,9 +156,17 @@ func FindStateTranslationExact(uniqueName string) (modelwarframe.StateTranslatio
 // 调用方通常只传末三段）。这里用 LIKE 缩小候选 + Go 侧 strings.HasSuffix 精确校验，
 // 取最长（最具体）的命中行；未命中或 name 为空返回空串。
 // 用 Limit(1).Find 而非 First：未命中是常态（业务回退原值），不应产生 ErrRecordNotFound 错误路径。
+// 查询故障与未命中同样返回空串（故障走限频告警）；需要区分二者的调用方请用内部实现。
 func TranslateStateNameSuffix(key string) string {
+	name, _ := translateStateNameSuffix(key)
+	return name
+}
+
+// translateStateNameSuffix 后缀查询内部实现：区分「未命中」（err 为 nil、name 为空）
+// 与「查询故障」（err 非 nil，经 warnTranslationQueryError 限频告警）。
+func translateStateNameSuffix(key string) (string, error) {
 	if key == "" || database.DB == nil {
-		return ""
+		return "", nil
 	}
 	var record modelwarframe.StateTranslation
 	err := database.DB.
@@ -122,13 +176,13 @@ func TranslateStateNameSuffix(key string) string {
 		Limit(1).
 		Find(&record).Error
 	if err != nil {
-		logging.DebugPack("warframe.translate", "query state_translation %q failed: %v", key, err)
-		return ""
+		warnTranslationQueryError("state_translation", key, err)
+		return "", err
 	}
 	if record.UniqueName == "" || !strings.HasSuffix(record.UniqueName, key) {
-		return ""
+		return "", nil
 	}
-	return record.Name
+	return record.Name, nil
 }
 
 // escapeLikeKey 转义 LIKE 通配符（配合 ESCAPE '\'），保证 key 中的 _ / % 按字面量参与粗筛。
