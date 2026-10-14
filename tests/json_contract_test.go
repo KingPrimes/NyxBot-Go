@@ -29,6 +29,7 @@ func TestModelJSONContract(t *testing.T) {
 		{"nightWave", modelwarframe.NightWave{Description: "x|COUNT|y", Required: 3}, "description", `"x3y"`},
 		{"relicRewards", modelwarframe.RelicRewards{Rarity: 1}, "rarity", `"UNCOMMON"`},
 		{"reward", modelwarframe.Reward{Rarity: 2}, "rarity", `"RARE"`},
+		{"rewardItemCount", modelwarframe.Reward{Item: "永冻晶矿 X |COUNT|", ItemCount: 100}, "item", `"永冻晶矿 X 100"`},
 		{"weapons", modelwarframe.Weapons{ProductCategory: 8}, "productCategory", `"Shotguns"`},
 		{"warframes", modelwarframe.Warframes{SprintSpeed: 1}, "sprintSpeed", `1`},
 		{"checkType", modelwarframe.MissionSubscribeUserCheckType{Subscribe: "ALERTS"}, "subscribe", `"ALERTS"`},

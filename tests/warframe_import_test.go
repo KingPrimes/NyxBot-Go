@@ -1,6 +1,6 @@
 // Warframe 数据导入修复回归测试：
 // 覆盖 state_translation 名称字段解析/类型正则、遗物奖励共享主键、奖励名翻译、
-// state_translation 后缀匹配（对齐 Java findByUniqueName）与遗物四级回退查询。
+// state_translation 后缀/等值匹配（对齐 Java findByUniqueName）与遗物四级回退查询。
 package tests
 
 import (
@@ -212,6 +212,80 @@ func TestTranslateStateNameSuffixLookup(t *testing.T) {
 	}
 	if got := warframe.TranslateStateName("/Lotus/StoreItems/Weapons/Missing"); got != "/Lotus/StoreItems/Weapons/Missing" {
 		t.Fatalf("miss should fall back to raw, got %q", got)
+	}
+}
+
+// TestFindStateTranslationExact 验证等值（主键）查询返回整行记录：
+// 仅 unique_name 完全相同才命中（所以完整路径不会命中只有短 key 的遗留行，那是后缀语义的职责），
+// 未命中返回 ok=false 并登记到未翻译清单；命中、空名行、空 key 都不登记。
+func TestFindStateTranslationExact(t *testing.T) {
+	setupImportFixDB(t)
+	path := useUntranslatedFile(t)
+
+	database.DB.Create(&modelwarframe.StateTranslation{
+		UniqueName:  "/Lotus/StoreItems/Weapons/ChromaPrime",
+		Name:        "Chroma Prime",
+		Description: "chroma desc",
+		Type:        8,
+		ParentName:  "Chroma",
+	})
+	// 兼容 Java 侧曾用短 key 入库的数据：短 key 等值可命中，完整路径不行
+	database.DB.Create(&modelwarframe.StateTranslation{
+		UniqueName: "StoreItems/Weapons/FrostPrime", Name: "Frost Prime", Type: 8,
+	})
+	// 空名行：等值命中仍返回整行（是否回退由调用方决定），不算未命中
+	database.DB.Create(&modelwarframe.StateTranslation{
+		UniqueName: "/Lotus/StoreItems/Weapons/EmptyName", Name: "", Type: 8,
+	})
+
+	// 命中：返回整行记录（含 description/parentName/type）
+	record, ok := warframe.FindStateTranslationExact("/Lotus/StoreItems/Weapons/ChromaPrime")
+	if !ok {
+		t.Fatal("exact hit should return ok")
+	}
+	if record.UniqueName != "/Lotus/StoreItems/Weapons/ChromaPrime" || record.Name != "Chroma Prime" ||
+		record.Description != "chroma desc" || record.ParentName != "Chroma" || record.Type != 8 {
+		t.Fatalf("record mismatch: %+v", record)
+	}
+
+	// 主键等值语义：短 key 行只被短 key 命中
+	if record, ok := warframe.FindStateTranslationExact("StoreItems/Weapons/FrostPrime"); !ok || record.Name != "Frost Prime" {
+		t.Fatalf("short-key exact hit mismatch: ok=%v record=%+v", ok, record)
+	}
+	if record, ok := warframe.FindStateTranslationExact("/Lotus/StoreItems/Weapons/FrostPrime"); ok {
+		t.Fatalf("full path must not hit the short-key row (that is suffix semantics): %+v", record)
+	}
+
+	// 空名行按命中返回，登记与否由调用方决定
+	if record, ok := warframe.FindStateTranslationExact("/Lotus/StoreItems/Weapons/EmptyName"); !ok || record.Name != "" {
+		t.Fatalf("empty-name row should be returned as-is: ok=%v record=%+v", ok, record)
+	}
+
+	// 空 key 不查询也不登记
+	if record, ok := warframe.FindStateTranslationExact(""); ok || record.UniqueName != "" {
+		t.Fatalf("empty key should be a no-op miss: ok=%v record=%+v", ok, record)
+	}
+
+	// 未命中：ok=false 且登记到未翻译清单（带草稿名）
+	if record, ok := warframe.FindStateTranslationExact("/Lotus/StoreItems/Weapons/Missing"); ok || record.UniqueName != "" {
+		t.Fatalf("miss should return zero record: ok=%v record=%+v", ok, record)
+	}
+
+	items := readUntranslatedItems(t, path)
+	want := []string{
+		"/Lotus/StoreItems/Weapons/FrostPrime", // 完整路径无等值行（短 key 行不算）
+		"/Lotus/StoreItems/Weapons/Missing",
+	}
+	if len(items) != len(want) {
+		t.Fatalf("expect %d recorded misses, got %d: %+v", len(want), len(items), items)
+	}
+	for i, uniqueName := range want {
+		if items[i].UniqueName != uniqueName {
+			t.Fatalf("recorded[%d] = %q, want %q", i, items[i].UniqueName, uniqueName)
+		}
+	}
+	if items[0].Name != "Frost Prime" || items[1].Name != "Missing" {
+		t.Fatalf("draft names mismatch: %+v", items)
 	}
 }
 

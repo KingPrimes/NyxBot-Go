@@ -17,11 +17,15 @@ const (
 )
 
 // CalendarEvent 日历单日事件（对齐 Java KnownCalendarSeasons.Events）。
+// 任务/加成的名称与描述来自 state_translation 的 name/description 两列；
+// 未命中时名称保留原始路径，由绘图层取尾段显示。
 type CalendarEvent struct {
-	Type      CalendarEventType // 事件类型
-	Challenge string            // 任务描述
-	Reward    string            // 奖励描述
-	Upgrade   string            // 加成描述
+	Type          CalendarEventType // 事件类型
+	Challenge     string            // 任务名称
+	ChallengeDesc string            // 任务详细需求（state_translation.description）
+	Reward        string            // 奖励名称
+	Upgrade       string            // 加成名称
+	UpgradeDesc   string            // 加成数值描述（state_translation.description）
 }
 
 // CalendarDay 日历单日（对齐 Java KnownCalendarSeasons.Days）。
@@ -49,6 +53,16 @@ type calendarMonthCard struct {
 const (
 	calendarCardRadius = 14 // 卡片圆角
 	calendarCardPad    = 20 // 卡片内边距
+)
+
+// 事件行布局常量：卡片高度计算（calcMonthCardHeight）与绘制（drawMonthCard）必须同口径。
+const (
+	calendarEventFontSize = 18 // 事件名称字号
+	calendarEventIndent   = 15 // 事件名称相对卡片内边距的缩进
+	calendarEventLineH    = 30 // 事件名称行高
+	calendarDescFontSize  = 16 // 事件描述字号（电波挑战卡同款小字号）
+	calendarDescIndent    = 15 // 事件描述相对名称的缩进
+	calendarDescLineH     = 28 // 事件描述行高
 )
 
 // DrawKnownCalendarSeasons 绘制 1999 日历季节图（对齐 drawKnownCalendarSeasonsImage）。
@@ -92,7 +106,7 @@ func DrawKnownCalendarSeasons(list []*KnownCalendarSeasons) []byte {
 
 	cardHeights := make([]int, n)
 	for i := range cards {
-		cardHeights[i] = calcMonthCardHeight(cards[i])
+		cardHeights[i] = calcMonthCardHeight(cards[i], textW)
 	}
 
 	colEndY := make([]int, cols)
@@ -173,13 +187,19 @@ func DrawKnownCalendarSeasons(list []*KnownCalendarSeasons) []byte {
 }
 
 // calcMonthCardHeight 计算单张月卡高度（对齐 Java calcCardHeight）。
-func calcMonthCardHeight(card calendarMonthCard) int {
+// 任务/加成的描述子行按换行行数计入（textW 与绘制同一口径）。
+func calcMonthCardHeight(card calendarMonthCard, textW int) int {
 	h := calendarCardPad // 顶部
 	h += 40              // 月份标题
 	h += 8               // 分隔线
 	for _, day := range card.days {
 		h += 30 // 日期行
-		h += len(day.Events) * 30
+		for _, event := range day.Events {
+			h += calendarEventLineH
+			if desc := calendarEventDescription(event); desc != "" {
+				h += textWrapLineCount(desc, calendarDescFontSize, calendarDescMaxWidth(textW)) * calendarDescLineH
+			}
+		}
 	}
 	h += calendarCardPad // 底部
 	return maxI(h, 100)
@@ -210,9 +230,17 @@ func drawMonthCard(canvas *Canvas, month int, days []*CalendarDay, cardX, cardY,
 		cy += 30
 		for _, ev := range day.Events {
 			label, eColor := calendarEventDesc(ev)
-			canvas.SetColor(eColor).SetFontSize(18)
-			canvas.AddText(label, float64(innerX+15), float64(cy+20))
-			cy += 30
+			canvas.SetColor(eColor).SetFontSize(calendarEventFontSize)
+			canvas.AddText(label, float64(innerX+calendarEventIndent), float64(cy+20))
+			cy += calendarEventLineH
+			// 描述换行子行（电波挑战卡同款：浅灰小字号、自动换行）
+			if desc := calendarEventDescription(ev); desc != "" {
+				canvas.SetColor(textSecondaryColor).SetFontSize(calendarDescFontSize)
+				for _, line := range wrapText(canvas, desc, calendarDescMaxWidth(textW)) {
+					canvas.AddText(line, float64(innerX+calendarEventIndent+calendarDescIndent), float64(cy+18))
+					cy += calendarDescLineH
+				}
+			}
 		}
 	}
 }
@@ -231,29 +259,37 @@ func calendarSeasonColor(month int) color.RGBA {
 	}
 }
 
-// calendarEventDesc 事件类型 → 标签前缀 + 颜色（对齐 Java getEventDesc 与事件色）。
+// calendarEventDesc 事件类型 → 标签前缀 + 名称与事件色（对齐 Java getEventDesc 与事件色）。
+// 路径原文（以 / 开头且无空格）说明该名称未翻译，渲染前取尾段（与赏金卡片同一工具）。
 func calendarEventDesc(ev *CalendarEvent) (string, color.RGBA) {
-	var label, desc string
+	var label, name string
 	var col color.RGBA
 	switch ev.Type {
 	case CETChallenge:
-		label, desc, col = "[任务] ", ev.Challenge, color.RGBA{0xFF, 0x6B, 0x6B, 0xff}
+		label, name, col = "[任务] ", ev.Challenge, color.RGBA{0xFF, 0x6B, 0x6B, 0xff}
 	case CETReward:
-		label, desc, col = "[奖励] ", ev.Reward, color.RGBA{0x4C, 0xAF, 0x50, 0xff}
+		label, name, col = "[奖励] ", ev.Reward, color.RGBA{0x4C, 0xAF, 0x50, 0xff}
 	case CETUpgrade:
-		label, desc, col = "[加成] ", ev.Upgrade, color.RGBA{0xB8, 0x86, 0x0B, 0xff}
+		label, name, col = "[加成] ", ev.Upgrade, color.RGBA{0xB8, 0x86, 0x0B, 0xff}
 	default:
 		return "未知", textSecondaryColor
 	}
-	if desc == "" {
-		return label, col
+	return label + PathTail(name), col
+}
+
+// calendarEventDescription 事件对应描述文本（仅任务/加成有；奖励无描述）。
+func calendarEventDescription(ev *CalendarEvent) string {
+	switch ev.Type {
+	case CETChallenge:
+		return ev.ChallengeDesc
+	case CETUpgrade:
+		return ev.UpgradeDesc
+	default:
+		return ""
 	}
-	// 路径（含 /）未翻译 → 取尾段
-	for i := len(desc) - 1; i >= 0; i-- {
-		if desc[i] == '/' {
-			desc = desc[i+1:]
-			break
-		}
-	}
-	return label + desc, col
+}
+
+// calendarDescMaxWidth 描述换行可用宽度（与绘制同口径：卡片文本宽 - 名称缩进 - 描述缩进）。
+func calendarDescMaxWidth(textW int) float64 {
+	return float64(textW - calendarEventIndent - calendarDescIndent)
 }

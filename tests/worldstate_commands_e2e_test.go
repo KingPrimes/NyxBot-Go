@@ -97,9 +97,9 @@ func seedWorldStateCommandData(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// 赏金任务类型/描述按最后三段查 state_translation（对齐 Java getLastThreeSegments）
+	// 赏金 jobType 与表内同为完整路径（生产数据形态），等值（主键）查 state_translation
 	if err := database.DB.Create(&modelwarframe.StateTranslation{
-		UniqueName: "Levels/Jobs/CetusBounty1", Name: "赏金任务", Description: "清剿感染体", Type: 0,
+		UniqueName: "/Lotus/Types/Levels/Jobs/CetusBounty1", Name: "赏金任务", Description: "清剿感染体", Type: 0,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}

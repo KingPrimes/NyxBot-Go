@@ -282,9 +282,9 @@ func TestGetAllCycleWithoutWorldState(t *testing.T) {
 // TestGetSyndicate 验证三赏金：按 Tag 命中、任务类型翻译、奖励池关联、节点视图数据。
 func TestGetSyndicate(t *testing.T) {
 	setupWorldStateBatchDB(t)
-	// 赏金任务按最后三段查 state_translation（对齐 Java StringUtils.getLastThreeSegments）
+	// 赏金 jobType 与表内同为完整路径（生产数据形态），等值（主键）查 state_translation
 	if err := database.DB.Create(&modelwarframe.StateTranslation{
-		UniqueName: "Levels/Jobs/CetusBounty1", Name: "赏金任务", Description: "清剿感染体", Type: 0,
+		UniqueName: "/Lotus/Types/Levels/Jobs/CetusBounty1", Name: "赏金任务", Description: "清剿感染体", Type: 0,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +332,35 @@ func TestGetSyndicate(t *testing.T) {
 	}
 	if len(job.Rewards) != 1 || job.Rewards[0].Item != "现金" || job.Rewards[0].ItemCount != 5000 {
 		t.Fatalf("奖励池关联失败: %+v", job.Rewards)
+	}
+}
+
+// TestGetSyndicateUntranslatedRegistry 验证赏金翻译未命中（表内无该完整路径）时：
+// 回退原文并登记未翻译清单，重复查询按 uniqueName 去重。
+func TestGetSyndicateUntranslatedRegistry(t *testing.T) {
+	setupWorldStateBatchDB(t)
+	path := useUntranslatedFile(t)
+
+	raw := `{"SyndicateMissions":[
+	  {"Tag":"CetusSyndicate","Jobs":[
+	     {"jobType":"/Lotus/Types/Levels/Jobs/MissingBounty","rewards":"/Lotus/Rewards/None"}]}]}`
+	warframe.DefaultWorldState().SetRaw([]byte(raw))
+
+	mission, err := warframe.GetSyndicate(warframe.SyndicateOstrons)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mission.Jobs) != 1 || mission.Jobs[0].Type != "/Lotus/Types/Levels/Jobs/MissingBounty" {
+		t.Fatalf("未命中应回退原文: %+v", mission.Jobs)
+	}
+	// 重复查询：登记按 uniqueName 去重
+	if _, err := warframe.GetSyndicate(warframe.SyndicateOstrons); err != nil {
+		t.Fatal(err)
+	}
+
+	items := readUntranslatedItems(t, path)
+	if len(items) != 1 || items[0].UniqueName != "/Lotus/Types/Levels/Jobs/MissingBounty" {
+		t.Fatalf("未命中应登记一次未翻译清单: %+v", items)
 	}
 }
 
@@ -451,11 +480,18 @@ func TestGetSeasonInfo(t *testing.T) {
 	}
 }
 
-// TestGetKnownCalendarSeasons 验证 1999 日历：一年中第几天换算月/日、按月分组、事件翻译。
+// TestGetKnownCalendarSeasons 验证 1999 日历：一年中第几天换算月/日、按月分组、
+// 任务/加成按完整路径等值取名称+描述、奖励去除 <...> 标记、等值未命中回退原文并登记未翻译清单。
 func TestGetKnownCalendarSeasons(t *testing.T) {
 	setupWorldStateBatchDB(t)
+	path := useUntranslatedFile(t)
 	if err := database.DB.Create(&modelwarframe.StateTranslation{
-		UniqueName: "/Lotus/Challenges/Cal1", Name: "完成日历任务", Type: 0,
+		UniqueName: "/Lotus/Challenges/Cal1", Name: "完成日历任务", Description: "使用技能击杀100名敌人。", Type: 0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.Create(&modelwarframe.StateTranslation{
+		UniqueName: "/Lotus/Upgrades/CalUp1", Name: "瓶装闪电", Description: "为所有武器增加25%的异常状态伤害和电击异常状态触发几率。", Type: 0,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +503,10 @@ func TestGetKnownCalendarSeasons(t *testing.T) {
 	// day=32 → 2 月 1 日；day=1 → 1 月 1 日
 	raw := `{"KnownCalendarSeasons":[{"Season":"CST_WINTER","YearIteration":2025,"Version":7,"Days":[
 	  {"day":32,"events":[{"type":"CET_CHALLENGE","challenge":"/Lotus/Challenges/Cal1"}]},
-	  {"day":1,"events":[{"type":"CET_REWARD","reward":"/Lotus/Rewards/Cal1"}]}]}]}`
+	  {"day":1,"events":[
+	     {"type":"CET_REWARD","reward":"/Lotus/Rewards/Cal1"},
+	     {"type":"CET_UPGRADE","upgrade":"/Lotus/Upgrades/CalUp1"},
+	     {"type":"CET_CHALLENGE","challenge":"/Lotus/Challenges/Missing"}]}]}]}`
 	warframe.DefaultWorldState().SetRaw([]byte(raw))
 
 	list, err := warframe.GetKnownCalendarSeasons()
@@ -492,11 +531,29 @@ func TestGetKnownCalendarSeasons(t *testing.T) {
 	if len(feb) != 1 || feb[0].Day != 1 {
 		t.Fatalf("2 月分组错误（day=32 应为 2 月 1 日）: %+v", feb)
 	}
-	if got := feb[0].Events[0]; got.Type != draw.CETChallenge || got.Challenge != "完成日历任务" {
-		t.Fatalf("挑战事件翻译失败: %+v", got)
+	if got := feb[0].Events[0]; got.Type != draw.CETChallenge ||
+		got.Challenge != "完成日历任务" || got.ChallengeDesc != "使用技能击杀100名敌人。" {
+		t.Fatalf("挑战事件应取名称与描述: %+v", got)
 	}
-	if got := jan[0].Events[0]; got.Type != draw.CETReward || got.Reward != "稀有奖励" {
+	events := jan[0].Events
+	if len(events) != 3 {
+		t.Fatalf("1 月 1 日事件数 = %d, 期望 3", len(events))
+	}
+	if got := events[0]; got.Type != draw.CETReward || got.Reward != "稀有奖励" {
 		t.Fatalf("奖励事件应去除 <...> 标记: %+v", got)
+	}
+	if got := events[1]; got.Type != draw.CETUpgrade ||
+		got.Upgrade != "瓶装闪电" || got.UpgradeDesc != "为所有武器增加25%的异常状态伤害和电击异常状态触发几率。" {
+		t.Fatalf("加成事件应取名称与描述: %+v", got)
+	}
+	// 等值未命中：回退原文（路径）且无描述
+	if got := events[2]; got.Type != draw.CETChallenge ||
+		got.Challenge != "/Lotus/Challenges/Missing" || got.ChallengeDesc != "" {
+		t.Fatalf("挑战未命中应回退原文: %+v", got)
+	}
+	items := readUntranslatedItems(t, path)
+	if len(items) != 1 || items[0].UniqueName != "/Lotus/Challenges/Missing" {
+		t.Fatalf("未命中应登记未翻译清单: %+v", items)
 	}
 }
 
@@ -573,7 +630,11 @@ func TestWorldStateBatchDrawChain(t *testing.T) {
 	if image := draw.DrawKnownCalendarSeasons([]*draw.KnownCalendarSeasons{{
 		Season: "冬季", YearIteration: 2025, Version: "7",
 		MonthDays: map[int][]*draw.CalendarDay{
-			1: {{Month: 1, Day: 1, Events: []*draw.CalendarEvent{{Type: draw.CETChallenge, Challenge: "完成日历任务"}}}},
+			1: {{Month: 1, Day: 1, Events: []*draw.CalendarEvent{
+				{Type: draw.CETChallenge, Challenge: "完成日历任务", ChallengeDesc: "使用技能击杀150名炽蛇军敌人。"},
+				{Type: draw.CETUpgrade, Upgrade: "瓶装闪电", UpgradeDesc: "为所有武器增加25%的异常状态伤害和电击异常状态触发几率。"},
+				{Type: draw.CETReward, Reward: "稀有奖励"},
+			}}},
 		},
 	}}); len(image) == 0 {
 		t.Fatal("DrawKnownCalendarSeasons 输出为空")

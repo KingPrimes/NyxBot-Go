@@ -1039,7 +1039,8 @@ func (importer *DataImporter) ImportRelics(_ context.Context) error {
 	return nil
 }
 
-// ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 运行时替换）。
+// ImportRewardPool 从 CDN reward_pool.json 导入奖励池（|COUNT| 占位入库保留原始模板，
+// 渲染与序列化时替换——对齐 Java Reward.getItem() 与 NightWave 既有范式）。
 // CDN 数据的 rarity 是字符串枚举名（如 "COMMON"），经 rarityNameToOrdinal 转 ORDINAL。
 func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 	raw, err := cdnFileFetcher("warframe/reward_pool.json")
@@ -1069,11 +1070,10 @@ func (importer *DataImporter) ImportRewardPool(_ context.Context) error {
 			if id == "" {
 				id = fmt.Sprintf("%s-%s", record.UniqueName, reward.Item)
 			}
-			item := strings.ReplaceAll(reward.Item, "|COUNT|", fmt.Sprintf("%d", reward.ItemCount))
 			rewards = append(rewards, modelwarframe.Reward{
 				ID:        id,
 				PoolID:    record.UniqueName,
-				Item:      item,
+				Item:      reward.Item, // 保留 |COUNT| 原始模板，展示/序列化时替换
 				Rarity:    rarityNameToOrdinal(reward.Rarity),
 				ItemCount: reward.ItemCount,
 			})
@@ -1309,42 +1309,42 @@ func detectWeaponCategory(uniqueName string) string {
 // 派系词条无 Mod 后缀且拼 Grineer（非 Griner），穿甲为 WeaponArmorPiercingDamageMod）。
 func tagToTrendName(tag string) string {
 	names := map[string]string{
-		"WeaponDamageAmountMod":             "伤害/近战伤害",
-		"WeaponMeleeDamageMod":              "伤害/近战伤害",
-		"WeaponCritChanceMod":               "暴击几率",
-		"WeaponCritDamageMod":               "暴击伤害",
-		"WeaponFireRateMod":                 "射速/攻击速度",
-		"WeaponFireIterationsMod":           "多重射击",
-		"WeaponProcTimeMod":                 "触发时间",
-		"WeaponStunChanceMod":               "触发几率",
-		"WeaponElectricityDamageMod":        "电击伤害",
-		"WeaponFireDamageMod":               "火焰伤害",
-		"WeaponFreezeDamageMod":             "冰冻伤害",
-		"WeaponToxinDamageMod":              "毒素伤害",
-		"WeaponImpactDamageMod":             "冲击伤害",
-		"WeaponSlashDamageMod":              "切割伤害",
-		"WeaponArmorPiercingDamageMod":      "穿刺伤害",
-		"WeaponAmmoMaxMod":                  "弹药最大值",
-		"WeaponClipMaxMod":                  "弹匣容量",
-		"WeaponRecoilReductionMod":          "后坐力",
-		"WeaponReloadSpeedMod":              "装填速度",
-		"WeaponProjectileSpeedMod":          "投射物飞行速度",
-		"WeaponPunctureDepthMod":            "穿透",
-		"WeaponZoomFovMod":                  "变焦",
-		"WeaponFactionDamageCorpus":         "对Corpus伤害",
-		"WeaponFactionDamageGrineer":        "对Grineer伤害",
-		"WeaponFactionDamageInfested":       "对Infested伤害",
-		"WeaponMeleeFactionDamageCorpus":    "对Corpus伤害",
-		"WeaponMeleeFactionDamageGrineer":   "对Grineer伤害",
-		"WeaponMeleeFactionDamageInfested":  "对Infested伤害",
-		"WeaponMeleeRangeIncMod":            "攻击范围",
-		"WeaponMeleeFinisherDamageMod":      "处决伤害",
-		"WeaponMeleeComboEfficiencyMod":     "重击效率",
-		"WeaponMeleeComboInitialBonusMod":   "初始连击",
-		"WeaponMeleeComboPointsOnHitMod":    "额外连击数几率",
-		"WeaponMeleeComboBonusOnHitMod":     "几率不获得连击数",
-		"ComboDurationMod":                  "连击持续时间",
-		"SlideAttackCritChanceMod":          "滑行攻击暴击几率",
+		"WeaponDamageAmountMod":            "伤害/近战伤害",
+		"WeaponMeleeDamageMod":             "伤害/近战伤害",
+		"WeaponCritChanceMod":              "暴击几率",
+		"WeaponCritDamageMod":              "暴击伤害",
+		"WeaponFireRateMod":                "射速/攻击速度",
+		"WeaponFireIterationsMod":          "多重射击",
+		"WeaponProcTimeMod":                "触发时间",
+		"WeaponStunChanceMod":              "触发几率",
+		"WeaponElectricityDamageMod":       "电击伤害",
+		"WeaponFireDamageMod":              "火焰伤害",
+		"WeaponFreezeDamageMod":            "冰冻伤害",
+		"WeaponToxinDamageMod":             "毒素伤害",
+		"WeaponImpactDamageMod":            "冲击伤害",
+		"WeaponSlashDamageMod":             "切割伤害",
+		"WeaponArmorPiercingDamageMod":     "穿刺伤害",
+		"WeaponAmmoMaxMod":                 "弹药最大值",
+		"WeaponClipMaxMod":                 "弹匣容量",
+		"WeaponRecoilReductionMod":         "后坐力",
+		"WeaponReloadSpeedMod":             "装填速度",
+		"WeaponProjectileSpeedMod":         "投射物飞行速度",
+		"WeaponPunctureDepthMod":           "穿透",
+		"WeaponZoomFovMod":                 "变焦",
+		"WeaponFactionDamageCorpus":        "对Corpus伤害",
+		"WeaponFactionDamageGrineer":       "对Grineer伤害",
+		"WeaponFactionDamageInfested":      "对Infested伤害",
+		"WeaponMeleeFactionDamageCorpus":   "对Corpus伤害",
+		"WeaponMeleeFactionDamageGrineer":  "对Grineer伤害",
+		"WeaponMeleeFactionDamageInfested": "对Infested伤害",
+		"WeaponMeleeRangeIncMod":           "攻击范围",
+		"WeaponMeleeFinisherDamageMod":     "处决伤害",
+		"WeaponMeleeComboEfficiencyMod":    "重击效率",
+		"WeaponMeleeComboInitialBonusMod":  "初始连击",
+		"WeaponMeleeComboPointsOnHitMod":   "额外连击数几率",
+		"WeaponMeleeComboBonusOnHitMod":    "几率不获得连击数",
+		"ComboDurationMod":                 "连击持续时间",
+		"SlideAttackCritChanceMod":         "滑行攻击暴击几率",
 	}
 	return names[tag]
 }

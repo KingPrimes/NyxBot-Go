@@ -14,8 +14,8 @@ import (
 // 包级引擎状态：Prepare 在后台写入，Ready 供指令侧读取。
 var (
 	stateMu     sync.RWMutex
-	stateEngine *Engine // 非 nil 表示就绪
-	stateErr    error   // 准备失败的原因；nil 且 engine 为 nil 表示仍在准备
+	stateEngine *Engine    // 非 nil 表示就绪
+	stateErr    error      // 准备失败的原因；nil 且 engine 为 nil 表示仍在准备
 	prepareMu   sync.Mutex // 串行化 Prepare，防止并发准备互相覆盖状态
 )
 

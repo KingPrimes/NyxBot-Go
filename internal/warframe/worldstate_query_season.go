@@ -318,8 +318,10 @@ func dayOfYearToMonthDay(dayOfYear int) (int, int) {
 	return month + 1, remaining
 }
 
-// translateCalendarEvent 按事件类型翻译对应字段（对齐 Java processEvent）：
-// 挑战与加成都查 state_translation 取名，奖励额外去除「<...>」标记。
+// translateCalendarEvent 按事件类型翻译对应字段（在 Java processEvent 基础上的扩展：
+// 任务/加成改为完整路径等值查询——与表内形态一致、走主键索引——并额外取 description
+// 作为详细需求 / 加成数值；奖励维持 Java 的后缀语义并去除「<...>」标记）。
+// 未命中时保留原文回退，并由 FindStateTranslationExact 登记未翻译清单。
 func translateCalendarEvent(event *wsCalendarEvent) *draw.CalendarEvent {
 	dto := &draw.CalendarEvent{
 		Type:      calendarEventType(event.Type),
@@ -329,11 +331,17 @@ func translateCalendarEvent(event *wsCalendarEvent) *draw.CalendarEvent {
 	}
 	switch event.Type {
 	case "CET_CHALLENGE":
-		dto.Challenge = TranslateStateNameDirect(event.Challenge)
+		if record, ok := FindStateTranslationExact(event.Challenge); ok && record.Name != "" {
+			dto.Challenge = record.Name
+			dto.ChallengeDesc = record.Description
+		}
 	case "CET_REWARD":
 		dto.Reward = deleteBetweenMarkers(TranslateStateNameDirect(event.Reward), '<', '>')
 	case "CET_UPGRADE":
-		dto.Upgrade = TranslateStateNameDirect(event.Upgrade)
+		if record, ok := FindStateTranslationExact(event.Upgrade); ok && record.Name != "" {
+			dto.Upgrade = record.Name
+			dto.UpgradeDesc = record.Description
+		}
 	}
 	return dto
 }

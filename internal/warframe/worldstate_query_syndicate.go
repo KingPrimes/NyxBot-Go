@@ -103,7 +103,7 @@ func syndicateTagName(syndicate WfSyndicate) string {
 }
 
 // translateSyndicateJob 翻译单条赏金（对齐 Java SyndicateMissionsUtils：
-// 按 jobType 或 locationTag 查 state_translation 取名称与描述，
+// 按 jobType 或 locationTag 等值查 state_translation 取名称与描述（与表内同为完整路径，走主键索引），
 // 再由 rewards 关联 reward_pool 表补全奖励）。
 func translateSyndicateJob(job *wsSyndicateJob) *draw.SyndicateJob {
 	dto := &draw.SyndicateJob{
@@ -117,42 +117,22 @@ func translateSyndicateJob(job *wsSyndicateJob) *draw.SyndicateJob {
 		XpAmounts:  job.XpAmounts,
 	}
 
-	// 类型/描述优先按 jobType 翻译，缺失时回退 locationTag（对齐 Java 的三元选择）
+	// 类型/描述优先按 jobType 翻译，缺失时回退 locationTag（对齐 Java 的三元选择）。
+	// 赏金 jobType/locationTag 与表内同为完整路径，走主键等值（plans/state-translation-lookup-plan.md §4）；
+	// 未命中由 FindStateTranslationExact 登记未翻译清单，这里保持原文回退。
 	translationKey := job.Type
 	if translationKey == "" {
 		translationKey = job.LocationTag
 	}
-	if name, desc := syndicateTranslation(translationKey); name != "" {
-		dto.Type = name
-		if desc != "" {
-			dto.Desc = desc
+	if record, ok := FindStateTranslationExact(translationKey); ok && record.Name != "" {
+		dto.Type = record.Name
+		if record.Description != "" {
+			dto.Desc = record.Description
 		}
 	}
 
 	dto.Rewards = syndicateJobRewards(job.Rewards)
 	return dto
-}
-
-// syndicateTranslation 按 uniqueName 查 state_translation 的名称与描述。
-// 未命中（或该行没有名称）时登记到未翻译清单，并把空串返回给调用方回退原文。
-func syndicateTranslation(uniqueName string) (string, string) {
-	if uniqueName == "" || database.DB == nil {
-		return "", ""
-	}
-	var st modelwarframe.StateTranslation
-	err := database.DB.Where("unique_name = ?", getLastThreeSegments(uniqueName)).First(&st).Error
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			logging.DebugPack("warframe.syndicate", "query state_translation %q failed: %v", uniqueName, err)
-			return "", ""
-		}
-		recordTranslationMiss(uniqueName)
-		return "", ""
-	}
-	if st.Name == "" {
-		recordTranslationMiss(uniqueName)
-	}
-	return st.Name, st.Description
 }
 
 // syndicateJobRewards 由 rewards 键关联 reward_pool 表并转换为绘图奖励列表。

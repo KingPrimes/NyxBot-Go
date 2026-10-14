@@ -19,7 +19,7 @@ import (
 
 // resolveOCRModelDir 返回测试用 OCR 模型目录：
 // 优先环境变量 NYXBOT_TEST_OCR_MODEL_DIR，否则尝试与仓库相邻的 ocr-bench 实验目录
-//（D:\Demos\ocr-bench\models\v6，含 PP-OCRv6 的 det.onnx 与 rec.onnx）。
+// （D:\Demos\ocr-bench\models\v6，含 PP-OCRv6 的 det.onnx 与 rec.onnx）。
 func resolveOCRModelDir(t *testing.T) string {
 	t.Helper()
 	if dir := os.Getenv("NYXBOT_TEST_OCR_MODEL_DIR"); dir != "" {
