@@ -166,7 +166,7 @@ func TestDrawLiteSoriteImage(t *testing.T) {
 	}
 }
 
-// TestDrawKnownCalendarSeasonsImage 1999 日历：双列月卡片。
+// TestDrawKnownCalendarSeasonsImage 1999 日历：双列月卡片（任务/加成含描述换行子行）。
 func TestDrawKnownCalendarSeasonsImage(t *testing.T) {
 	list := []*draw.KnownCalendarSeasons{
 		{
@@ -176,11 +176,11 @@ func TestDrawKnownCalendarSeasonsImage(t *testing.T) {
 			MonthDays: map[int][]*draw.CalendarDay{
 				12: {
 					{Month: 12, Day: 8, Events: []*draw.CalendarEvent{
-						{Type: draw.CETChallenge, Challenge: "今夜突涌"},
+						{Type: draw.CETChallenge, Challenge: "今夜突涌", ChallengeDesc: "使用技能击杀150名炽蛇军敌人。"},
 						{Type: draw.CETReward, Reward: "已解锁奖励"},
 					}},
 					{Month: 12, Day: 9, Events: []*draw.CalendarEvent{
-						{Type: draw.CETUpgrade, Upgrade: "感染加成"},
+						{Type: draw.CETUpgrade, Upgrade: "瓶装闪电", UpgradeDesc: "为所有武器增加25%的异常状态伤害和电击异常状态触发几率。"},
 					}},
 				},
 			},
