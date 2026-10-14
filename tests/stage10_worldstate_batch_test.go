@@ -282,9 +282,9 @@ func TestGetAllCycleWithoutWorldState(t *testing.T) {
 // TestGetSyndicate 验证三赏金：按 Tag 命中、任务类型翻译、奖励池关联、节点视图数据。
 func TestGetSyndicate(t *testing.T) {
 	setupWorldStateBatchDB(t)
-	// 赏金任务按最后三段查 state_translation（对齐 Java StringUtils.getLastThreeSegments）
+	// 赏金 jobType 与表内同为完整路径（生产数据形态），等值（主键）查 state_translation
 	if err := database.DB.Create(&modelwarframe.StateTranslation{
-		UniqueName: "Levels/Jobs/CetusBounty1", Name: "赏金任务", Description: "清剿感染体", Type: 0,
+		UniqueName: "/Lotus/Types/Levels/Jobs/CetusBounty1", Name: "赏金任务", Description: "清剿感染体", Type: 0,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +332,35 @@ func TestGetSyndicate(t *testing.T) {
 	}
 	if len(job.Rewards) != 1 || job.Rewards[0].Item != "现金" || job.Rewards[0].ItemCount != 5000 {
 		t.Fatalf("奖励池关联失败: %+v", job.Rewards)
+	}
+}
+
+// TestGetSyndicateUntranslatedRegistry 验证赏金翻译未命中（表内无该完整路径）时：
+// 回退原文并登记未翻译清单，重复查询按 uniqueName 去重。
+func TestGetSyndicateUntranslatedRegistry(t *testing.T) {
+	setupWorldStateBatchDB(t)
+	path := useUntranslatedFile(t)
+
+	raw := `{"SyndicateMissions":[
+	  {"Tag":"CetusSyndicate","Jobs":[
+	     {"jobType":"/Lotus/Types/Levels/Jobs/MissingBounty","rewards":"/Lotus/Rewards/None"}]}]}`
+	warframe.DefaultWorldState().SetRaw([]byte(raw))
+
+	mission, err := warframe.GetSyndicate(warframe.SyndicateOstrons)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mission.Jobs) != 1 || mission.Jobs[0].Type != "/Lotus/Types/Levels/Jobs/MissingBounty" {
+		t.Fatalf("未命中应回退原文: %+v", mission.Jobs)
+	}
+	// 重复查询：登记按 uniqueName 去重
+	if _, err := warframe.GetSyndicate(warframe.SyndicateOstrons); err != nil {
+		t.Fatal(err)
+	}
+
+	items := readUntranslatedItems(t, path)
+	if len(items) != 1 || items[0].UniqueName != "/Lotus/Types/Levels/Jobs/MissingBounty" {
+		t.Fatalf("未命中应登记一次未翻译清单: %+v", items)
 	}
 }
 

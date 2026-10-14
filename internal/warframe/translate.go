@@ -79,6 +79,32 @@ func recordTranslationMiss(uniqueName string) {
 	RecordUntranslated(uniqueName)
 }
 
+// FindStateTranslationExact 按完整 uniqueName 等值（主键）查 state_translation，返回整行记录。
+// 用于表内确实以完整路径存储 unique_name 的场景（如赏金的 jobType / locationTag：
+// 实测主键等值比 LIKE 后缀快 179×，见 plans/state-translation-lookup-plan.md）。
+// 命中返回 (记录, true)；未命中返回 (零值, false) 并登记到未翻译清单，由调用方回退原文。
+// 未命中是常态（业务回退原值），因此用 Limit(1).Find 而非 First，不产生 ErrRecordNotFound 错误路径；
+// 查询本身出错（非未命中）只记 Debug 日志，不登记未翻译清单（避免把查询故障当成缺译名）。
+func FindStateTranslationExact(uniqueName string) (modelwarframe.StateTranslation, bool) {
+	if uniqueName == "" || database.DB == nil {
+		return modelwarframe.StateTranslation{}, false
+	}
+	var record modelwarframe.StateTranslation
+	err := database.DB.
+		Where("unique_name = ?", uniqueName).
+		Limit(1).
+		Find(&record).Error
+	if err != nil {
+		logging.DebugPack("warframe.translate", "query state_translation %q failed: %v", uniqueName, err)
+		return modelwarframe.StateTranslation{}, false
+	}
+	if record.UniqueName == "" {
+		recordTranslationMiss(uniqueName)
+		return modelwarframe.StateTranslation{}, false
+	}
+	return record, true
+}
+
 // TranslateStateNameSuffix 按 Java StateTranslationRepository.findByUniqueName 的后缀语义取中文名：
 // JPQL 为 RIGHT(st.uniqueName, LENGTH(:key)) = :key（state_translation 存的是完整 uniqueName，
 // 调用方通常只传末三段）。这里用 LIKE 缩小候选 + Go 侧 strings.HasSuffix 精确校验，
