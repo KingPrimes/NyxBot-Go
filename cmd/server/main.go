@@ -76,6 +76,10 @@ func main() {
 	go importer.ImportAll(serverContext)
 	go warframe.RunWorldStatePolling(serverContext, exportClient)
 
+	// 预热仲裁单例：Once 内只构建缓存并 go 后台拉取，同步路径零网络（不阻塞启动），
+	// 使首次消费不必等同步网络
+	warframe.DefaultArbitration()
+
 	// 紫卡 OCR：后台校验/下载模型并初始化引擎（不阻塞主流程，就绪后经 ocr.Ready 获取）
 	if cfg.Ocr.Enabled {
 		go ocr.Prepare(serverContext, ocr.Config{

@@ -10,8 +10,10 @@ import (
 	"nyxbot-go/internal/enum/drawplugin"
 )
 
-// arbitrationCardLimit 前瞻列表图最多渲染的卡片数（对齐 Java filter(isWorth).limit(5)）。
-const arbitrationCardLimit = 5
+// arbitrationCardLimit 前瞻列表图最多渲染的卡片数。
+// 与 warframe 层的 arbitrationListLimit 保持一致（各 10），使「仲裁表」把筛选出的前瞻条目全部出图；
+// Java 原为 limit(5)，Go 放宽到 10（分级筛选已在上游完成，多余卡片直接截断）。
+const arbitrationCardLimit = 10
 
 // Arbitration 仲裁任务绘图输入。节点名（含星系）/ 任务类型 / 评级等显示值
 // 由 warframe.ArbitrationToDraw 在转换时补齐，draw 层只渲染不判定。
@@ -110,7 +112,7 @@ func DrawArbitration(a *Arbitration) []byte {
 }
 
 // DrawArbitrations 绘制仲裁前瞻列表图（两列网格）。列表已由 warframe 层按评级过滤，
-// 此处只渲染不判定，最多取前 arbitrationCardLimit 条。
+// 此处只渲染不判定，最多取前 arbitrationCardLimit（10）条。
 func DrawArbitrations(list []*Arbitration) []byte {
 	if len(list) == 0 {
 		return nil

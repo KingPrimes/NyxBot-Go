@@ -70,6 +70,12 @@ func TestCommandMatchSemantics(t *testing.T) {
 		{nyxbot.CmdWfRelics,
 			[]string{"核桃", "查核桃", "核桃 虚空"},
 			[]string{"吃核桃"}},
+		{nyxbot.CmdUpdateWfArbitration,
+			[]string{"更新仲裁"},
+			[]string{"更新仲裁表", "仲裁", "请更新仲裁"}},
+		{nyxbot.CmdUpdateWfArbitrationTiers,
+			[]string{"更新分级"},
+			[]string{"更新分级数据", "分级", "请更新分级"}},
 	}
 
 	for _, tc := range cases {

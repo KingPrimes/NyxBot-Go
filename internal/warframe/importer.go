@@ -90,6 +90,7 @@ func (importer *DataImporter) ImportAll(ctx context.Context) {
 		{"riven-tion-alias", importer.ImportRivenTionAlias},
 		{"riven-analyse", importer.ImportRivenAnalyseTrend},
 		{"nodes", importer.ImportNodes},
+		{"arbitration-tiers", importer.ImportArbitrationTiers},
 		{"weapons", importer.ImportWeapons},
 		{"night-wave", importer.ImportNightWave},
 		{"warframes", importer.ImportWarframes},
@@ -501,6 +502,35 @@ func (importer *DataImporter) ImportAlias(_ context.Context) error {
 			En: record.En,
 			Cn: record.Cn,
 		})
+	}
+	return batchSave(importer.db, upserts, false)
+}
+
+// ImportArbitrationTiers 从 CDN arbitration_tiers.json 导入仲裁节点分级（空数据抛错）。
+// 纯 CDN、无本地兜底、无缓存（见 plans/arbitration-tier-plan.md §4.0.5）；key 即主键，
+// batchSave 的 Save 语义天然按 key 覆盖，无需像 ImportAlias 那样另取业务键复用 id。
+// CDN 上文件缺失时返回错误，由调用侧降级（启动导入只告警、指令回「更新失败！」）。
+func (importer *DataImporter) ImportArbitrationTiers(_ context.Context) error {
+	raw, err := cdnFileFetcher("warframe/arbitration_tiers.json")
+	if err != nil {
+		return err
+	}
+	var records []modelwarframe.ArbitrationTier
+	if err := json.Unmarshal(raw, &records); err != nil {
+		return fmt.Errorf("parse arbitration_tiers.json: %w", err)
+	}
+	if len(records) == 0 {
+		return fmt.Errorf("arbitration_tiers.json is empty")
+	}
+	upserts := make([]modelwarframe.ArbitrationTier, 0, len(records))
+	for _, record := range records {
+		if record.Key == "" {
+			continue
+		}
+		upserts = append(upserts, modelwarframe.ArbitrationTier{Key: record.Key, Tier: record.Tier})
+	}
+	if len(upserts) == 0 {
+		return fmt.Errorf("arbitration_tiers.json has no usable record")
 	}
 	return batchSave(importer.db, upserts, false)
 }

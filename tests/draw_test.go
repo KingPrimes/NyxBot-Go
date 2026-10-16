@@ -140,6 +140,13 @@ func TestDrawArbitrationsImage(t *testing.T) {
 	}
 	assertPNG(t, "draw_arbitrations.png", draw.DrawArbitrations(list))
 
+	// 上限 10 条：14 条与恰好 10 条的出图高度应一致（多余的被截断）
+	_, heightAtTen := assertPNG(t, "draw_arbitrations_10.png", draw.DrawArbitrations(arbitrationListFixture(10)))
+	_, heightAtLimit := assertPNG(t, "draw_arbitrations_limit.png", draw.DrawArbitrations(arbitrationListFixture(14)))
+	if heightAtLimit != heightAtTen {
+		t.Fatalf("列表图应截断到 10 条：14 条出图高 %d，10 条出图高 %d", heightAtLimit, heightAtTen)
+	}
+
 	// 空列表与全 nil 列表应返回 nil 而非崩溃
 	if data := draw.DrawArbitrations(nil); data != nil {
 		t.Fatal("空列表应返回 nil")
@@ -147,6 +154,24 @@ func TestDrawArbitrationsImage(t *testing.T) {
 	if data := draw.DrawArbitrations([]*draw.Arbitration{nil}); data != nil {
 		t.Fatal("全 nil 列表应返回 nil")
 	}
+}
+
+// arbitrationListFixture 生成 n 条仲裁列表条目（评级轮转 S/A/B/C/D/F），用于列表图上限断言。
+func arbitrationListFixture(n int) []*draw.Arbitration {
+	base := now()
+	tiers := []string{"S", "A", "B", "C", "D", "F"}
+	list := make([]*draw.Arbitration, 0, n)
+	for index := range n {
+		list = append(list, &draw.Arbitration{
+			Activation:  base.Add(time.Duration(index-2) * time.Hour),
+			Expiry:      base.Add(time.Duration(index+1) * time.Hour),
+			Node:        "测试节点(谷神星)",
+			MissionName: "拦截",
+			Faction:     drawplugin.FactionGrineer,
+			Tier:        tiers[index%len(tiers)],
+		})
+	}
+	return list
 }
 
 // TestDrawAllInfoImage 系统信息图。

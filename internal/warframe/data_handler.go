@@ -87,6 +87,14 @@ func (h *DataHandler) Register(routes *gin.RouterGroup) {
 	alias.GET("/edit/:id", h.AliasEdit)
 	alias.DELETE("/remove/:id", h.AliasRemove)
 
+	// arbitration：update（仲裁时间表，前端 local-data.ts 无此路径，属前端未知接口）
+	arbitration := data.Group("/arbitration")
+	arbitration.POST("/update", h.UpdateArbitration)
+
+	// arbitration-tiers：update（仲裁节点分级，同上属前端未知接口）
+	arbitrationTiers := data.Group("/arbitration-tiers")
+	arbitrationTiers.POST("/update", h.UpdateArbitrationTiers)
+
 	// ephemeras：list / update
 	ephemeras := data.Group("/ephemeras")
 	ephemeras.POST("/list", h.EphemerasList)

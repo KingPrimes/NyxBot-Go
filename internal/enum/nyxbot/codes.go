@@ -19,6 +19,8 @@ const (
 	CmdUpdateWfResMarketRiven   Codes = "UPDATE_WARFRAME_RES_MARKET_RIVEN"
 	CmdUpdateWfSister           Codes = "UPDATE_WARFRAME_SISTER"
 	CmdUpdateWfTar              Codes = "UPDATE_WARFRAME_TAR"
+	CmdUpdateWfArbitration      Codes = "UPDATE_WARFRAME_ARBITRATION"
+	CmdUpdateWfArbitrationTiers Codes = "UPDATE_WARFRAME_ARBITRATION_TIERS"
 	CmdWfAlerts                 Codes = "WARFRAME_ALERTS_PLUGIN"
 	CmdWfSorties                Codes = "WARFRAME_SORTIES_PLUGIN"
 	CmdWfLiteSortie             Codes = "WARFRAME_LITE_SORITE_PLUGIN"
@@ -62,6 +64,8 @@ var CodesInfo = map[Codes]CodeInfo{
 	CmdUpdateWfResMarketRiven:   {Comm: `^更新WM紫卡$`, Permissions: PermSuperAdmin},
 	CmdUpdateWfSister:           {Comm: `^更新信条$`, Permissions: PermSuperAdmin},
 	CmdUpdateWfTar:              {Comm: `^更新翻译$`, Permissions: PermSuperAdmin},
+	CmdUpdateWfArbitrationTiers: {Comm: `^更新分级$`, Permissions: PermSuperAdmin},
+	CmdUpdateWfArbitration:      {Comm: `^更新仲裁$`, Permissions: PermSuperAdmin},
 	CmdWfAlerts:                 {Comm: `^警报$`, Permissions: PermUser},
 	CmdWfSorties:                {Comm: `^突击$`, Permissions: PermUser},
 	CmdWfLiteSortie:             {Comm: `^(执刑官猎杀|猎杀|执行官|执政官|执刑官)$`, Permissions: PermUser},
@@ -107,6 +111,8 @@ var CodesOrder = []Codes{
 	CmdUpdateWfResMarketRiven,
 	CmdUpdateWfSister,
 	CmdUpdateWfTar,
+	CmdUpdateWfArbitrationTiers,
+	CmdUpdateWfArbitration,
 	CmdWfAlerts,
 	CmdWfSorties,
 	CmdWfLiteSortie,
