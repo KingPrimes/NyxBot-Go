@@ -84,6 +84,7 @@ func autoMigrate() error {
 		&warframe.Sentinels{},
 		&warframe.NightWave{},
 		&warframe.Nodes{},
+		&warframe.ArbitrationTier{},
 		&warframe.Relics{},
 		&warframe.RelicRewards{},
 		&warframe.ModSet{},

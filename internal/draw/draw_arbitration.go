@@ -1,42 +1,36 @@
-// 仲裁图片：单条仲裁卡片（左卡片 + 右看板娘）与值得参与的仲裁列表（两列网格）
+// 仲裁图片：单条仲裁卡片（左卡片 + 右看板娘）与仲裁前瞻列表（两列网格）
 // 对齐 Java DefaultDrawArbitrationImage / DefaultDrawArbitrationsImage
 package draw
 
 import (
+	"image/color"
 	"strings"
 	"time"
 
 	"nyxbot-go/internal/enum/drawplugin"
 )
 
-// Arbitration 仲裁任务绘图输入（对齐 Java model.Arbitration 原始字段）。
+// arbitrationCardLimit 前瞻列表图最多渲染的卡片数（对齐 Java filter(isWorth).limit(5)）。
+const arbitrationCardLimit = 5
+
+// Arbitration 仲裁任务绘图输入。节点名（含星系）/ 任务类型 / 评级等显示值
+// 由 warframe.ArbitrationToDraw 在转换时补齐，draw 层只渲染不判定。
 type Arbitration struct {
-	Activation time.Time // 开始时间
-	Expiry     time.Time // 结束时间
-	ID         string
-	Node       string // 节点
-	Planet     string // 行星
-	Enemy      string // 敌人标识（Grin/Corpus 等）
-	Type       string // 任务类型
-	Etc        string
+	Activation  time.Time          // 开始时间
+	Expiry      time.Time          // 结束时间
+	Node        string             // 节点显示名「名称(星系)」
+	MissionName string             // 任务类型中文名
+	Faction     drawplugin.Faction // 派系枚举
+	Tier        string             // 评级 S/A/B/C/D/F（空值或未知值按 F 渲染）
 }
 
-// isWorth 判断仲裁是否值得参与（对齐 Java Arbitration.isWorth）。
-func (a *Arbitration) isWorth() bool {
-	isType := strings.Contains(a.Type, "拦截") || strings.Contains(a.Type, "防御")
-	isNode := strings.Contains(a.Node, "谷神星") || strings.Contains(a.Node, "水星")
-	isEnemy := strings.Contains(a.Enemy, "Grin") || strings.Contains(a.Enemy, "Infest")
-	return isType && isNode && isEnemy
-}
-
-// enemyInfo 派系信息（颜色/图标）。
-func (a *Arbitration) enemyInfo() drawplugin.FactionInfo {
-	return matchFaction(a.Enemy)
-}
-
-// enemyName 敌人显示名。
-func (a *Arbitration) enemyName() string {
-	return a.enemyInfo().Name
+// factionInfo 派系显示信息（颜色/图标）；空派系回退未知派系。
+func (a *Arbitration) factionInfo() drawplugin.FactionInfo {
+	info, ok := factionKeyInfo(a.Faction)
+	if !ok {
+		return drawplugin.FactionMap[drawplugin.FactionNone]
+	}
+	return info
 }
 
 // activationFormat 开始时间文本（本地时区）。
@@ -47,6 +41,30 @@ func (a *Arbitration) activationFormat() string {
 // timeLeft 剩余时间文本。
 func (a *Arbitration) timeLeft() string {
 	return timeDeltaString(time.Until(a.Expiry))
+}
+
+// tierColors 仲裁评级 → 颜色（S 最优，F 最差）。
+var tierColors = map[string]color.RGBA{
+	"S": tierSColor,
+	"A": tierAColor,
+	"B": tierBColor,
+	"C": tierCColor,
+	"D": tierDColor,
+	"F": tierFColor,
+}
+
+// tierLabel 评级显示文本：空值与未知值一律按 F 渲染。
+func tierLabel(tier string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(tier))
+	if _, ok := tierColors[normalized]; !ok {
+		return "F"
+	}
+	return normalized
+}
+
+// tierColor 评级对应颜色；空值与未知值按 F 渲染。
+func tierColor(tier string) color.RGBA {
+	return tierColors[tierLabel(tier)]
 }
 
 // DrawArbitration 绘制单条仲裁卡片图。
@@ -91,22 +109,23 @@ func DrawArbitration(a *Arbitration) []byte {
 	return data
 }
 
-// DrawArbitrations 绘制值得参与的仲裁列表图（两列网格）。
+// DrawArbitrations 绘制仲裁前瞻列表图（两列网格）。列表已由 warframe 层按评级过滤，
+// 此处只渲染不判定，最多取前 arbitrationCardLimit 条。
 func DrawArbitrations(list []*Arbitration) []byte {
 	if len(list) == 0 {
 		return nil
 	}
-	// 仅保留值得参与的前 5 条（对齐 Java filter(isWorth).limit(5)）
-	worthList := make([]*Arbitration, 0, minI(len(list), 5))
+	cards := make([]*Arbitration, 0, minI(len(list), arbitrationCardLimit))
 	for _, a := range list {
-		if a != nil && a.isWorth() {
-			worthList = append(worthList, a)
-			if len(worthList) == 5 {
-				break
-			}
+		if a == nil {
+			continue
+		}
+		cards = append(cards, a)
+		if len(cards) == arbitrationCardLimit {
+			break
 		}
 	}
-	if len(worthList) == 0 {
+	if len(cards) == 0 {
 		return nil
 	}
 
@@ -127,7 +146,7 @@ func DrawArbitrations(list []*Arbitration) []byte {
 	cardW := (contentW - colGap) / float64(cols)
 	colX := [2]float64{contentX, contentX + cardW + colGap}
 
-	n := len(worthList)
+	n := len(cards)
 	rows := (n + cols - 1) / cols
 	cardsH := rows*int(cardH) + (rows-1)*int(rowGap)
 	isOdd := n%cols != 0
@@ -149,7 +168,7 @@ func DrawArbitrations(list []*Arbitration) []byte {
 	canvas.AddCenteredText("有价值的仲裁任务", titleY)
 	canvas.SetColor(dividerColor).DrawLine(contentX, titleY+55, contentX+contentW, titleY+55)
 
-	for i, a := range worthList {
+	for i, a := range cards {
 		row := i / cols
 		col := i % cols
 		drawArbitrationCard(canvas, a, colX[col], contentStartY+float64(row*(int(cardH)+int(rowGap))), cardW, cardH, cardRad, cardPad, cardRowH, 18, 20)
@@ -164,8 +183,9 @@ func DrawArbitrations(list []*Arbitration) []byte {
 	return data
 }
 
-// drawArbitrationCard 绘制单张仲裁卡片（对齐 Java drawArbitrationCard 三行布局）。
-func drawArbitrationCard(canvas *Canvas, a *Arbitration, cardX, cardY, cardW, cardH, radius, pad, rowH, dataSize, worthSize float64) {
+// drawArbitrationCard 绘制单张仲裁卡片（对齐 Java drawArbitrationCard 三行布局，
+// 第三行右列展示节点评级）。
+func drawArbitrationCard(canvas *Canvas, a *Arbitration, cardX, cardY, cardW, cardH, radius, pad, rowH, dataSize, tierSize float64) {
 	innerX := cardX + pad
 	innerW := cardW - pad*2
 	rightX := innerX + innerW/2 + 10
@@ -185,7 +205,7 @@ func drawArbitrationCard(canvas *Canvas, a *Arbitration, cardX, cardY, cardW, ca
 	canvas.SetColor(textColor).SetFontSize(dataSize)
 	canvas.AddText("节点: "+node, innerX, row1Y)
 
-	info := a.enemyInfo()
+	info := a.factionInfo()
 	curX := rightX
 	if info.Icon != "" {
 		canvas.SetColor(hexToColor(info.Color)).SetIconFontSize(32)
@@ -193,30 +213,24 @@ func drawArbitrationCard(canvas *Canvas, a *Arbitration, cardX, cardY, cardW, ca
 		curX += canvas.StringWidth(info.Icon) + 4
 	}
 	canvas.SetColor(hexToColor(info.Color)).SetFontSize(dataSize)
-	canvas.AddText("敌人: "+a.enemyName(), curX, row1Y)
+	canvas.AddText("敌人: "+info.Name, curX, row1Y)
 
 	// 第二行：任务类型 | 开始时间
-	missionType := a.Type
-	if missionType == "" {
-		missionType = "未知"
+	missionName := a.MissionName
+	if missionName == "" {
+		missionName = "未知"
 	}
 	canvas.SetColor(textColor).SetFontSize(dataSize)
-	canvas.AddText("任务类型: "+missionType, innerX, row2Y)
+	canvas.AddText("任务类型: "+missionName, innerX, row2Y)
 	canvas.SetColor(textSecondaryColor).SetFontSize(dataSize)
 	canvas.AddText("开始: "+a.activationFormat(), rightX, row2Y)
 
-	// 第三行：剩余时间 | 值得参与
+	// 第三行：剩余时间 | 评级
 	canvas.SetColor(accentGoldColor).SetFontSize(dataSize)
 	canvas.AddText("剩余: "+a.timeLeft(), innerX, row3Y)
 
-	worthTextColor := notWorthColor
-	worthText := "不值得参与"
-	if a.isWorth() {
-		worthText = "值得参与"
-		worthTextColor = worthColor // 包常量：绿色强调
-	}
-	canvas.SetColor(worthTextColor).SetFontSize(worthSize)
-	canvas.AddText(worthText, rightX, row3Y)
+	canvas.SetColor(tierColor(a.Tier)).SetFontSize(tierSize)
+	canvas.AddText("评级: "+tierLabel(a.Tier), rightX, row3Y)
 }
 
 // scaleByPct 按百分比缩放宽高（对齐 DrawConstants.scaleByPct）。

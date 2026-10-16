@@ -1,12 +1,12 @@
-// 仲裁数据缓存，对应 Java NyxBot 的 ArbitrationCache
-// 三级回退：内存缓存 → ./data/arbitration 文件（Base64 JSON）→ 远程 API
-// 数据窗口裁剪：仅保留 expiry > now 且 activation < now+7d 的条目
+// 仲裁数据缓存，对应 Java NyxBot 的 ArbitrationCache。
+// 数据源为 browse.wf/arbys.txt（逐行 "unix秒,节点ID" 的官方导出）：启动时后台拉取并落
+// 本地文件 ./data/arbys.txt，消费路径只读本地文件（运行期不触网），本地文件也不可用时
+// 返回空列表，由「更新仲裁」指令补救。
+// 窗口裁剪：仅保留 expiry > now 且 activation < now+30d 的条目（解析阶段即丢弃，不建全量切片）。
 package warframe
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,58 +17,34 @@ import (
 	"sync"
 	"time"
 
+	"nyxbot-go/internal/enum/drawplugin"
 	"nyxbot-go/internal/logging"
 )
 
-// arbitrationURL 仲裁远程 API，请求头携带 User-Agent（对齐 Java ApiUrl.arbitrationPreList）。
-const arbitrationURL = "https://wf.555590.xyz/api/arbys?days=30"
+// arbitrationURL 仲裁原始数据地址（browse.wf 官方导出，纯文本逐行 "unix秒,节点ID"，无表头）。
+const arbitrationURL = "https://browse.wf/arbys.txt"
 
 const (
-	arbitrationFile      = "./data/arbitration" // 持久化文件（Base64 JSON）
-	arbitrationSevenDays = 7 * 24 * time.Hour   // 窗口：activation 距今 7 天内
-	arbitrationListLimit = 10                   // 前瞻列表条数
+	arbitrationFile      = "./data/arbys.txt"  // 本地缓存文件（远程原文）
+	arbitrationWindow    = 30 * 24 * time.Hour // 窗口：activation 距今 30 天内
+	arbitrationDuration  = 3600                // 单场仲裁时长（秒，官方排期间隔恒为 3600）
+	arbitrationListLimit = 10                  // 前瞻列表条数
 )
 
-// Arbitration 仲裁条目，对齐 Java draw-image-plugin 的 Arbitration 模型。
+// Arbitration 仲裁条目，只承载数据源的两列与由此推导的到期时间、派系。
+// 节点名（含星系）/ 任务类型 / 评级等显示值一律不落库，由 nodes 表在转换时补齐
+// （见 ArbitrationToDraw）。
 type Arbitration struct {
-	ID         string `json:"id"`          // 仲裁 ID 为开始时间的时间戳（Unix 秒）
-	Activation string `json:"activation"`  // 开始时间（RFC3339，UTC）
-	Expiry     string `json:"expiry"`      // 结束时间（RFC3339，UTC）
-	Node       string `json:"node"`        // 节点
-	Planet     string `json:"planet"`      // 行星（API 未返回，保留字段对齐 Java 模型）
-	Enemy      string `json:"enemy"`       // 敌人派系
-	Type       string `json:"missionType"` // 任务类型（API 字段名为 missionType）
+	Activation int64              // 开始时间（Unix 秒，arbys.txt 第一列）
+	NodeKey    string             // 节点 SolNode ID（arbys.txt 第二列）
+	Expiry     int64              // 结束时间（= Activation + arbitrationDuration）
+	Faction    drawplugin.Faction // 派系枚举（由 nodes 表派生）
 }
 
-// IsWorth 判断仲裁是否值得参与（对齐 Java Arbitration.isWorth：类型/节点/敌人三重匹配）。
-func (arb Arbitration) IsWorth() bool {
-	isType := strings.Contains(arb.Type, "拦截") || strings.Contains(arb.Type, "防御")
-	isNode := strings.Contains(arb.Node, "谷神星") || strings.Contains(arb.Node, "水星")
-	isEnemy := strings.Contains(arb.Enemy, "Grin") || strings.Contains(arb.Enemy, "Infest")
-	return isType && isNode && isEnemy
-}
-
-// activationTime 解析开始时间：优先 activation（RFC3339），缺失或非法时回退 ID（Unix 秒时间戳）；均失败返回零值。
-func (arb Arbitration) activationTime() time.Time {
-	if parsed, err := time.Parse(time.RFC3339, arb.Activation); err == nil {
-		return parsed
-	}
-	if seconds, err := strconv.ParseInt(arb.ID, 10, 64); err == nil {
-		return time.Unix(seconds, 0)
-	}
-	return time.Time{}
-}
-
-// expiryTime 解析结束时间；失败返回零值。
-func (arb Arbitration) expiryTime() time.Time {
-	parsed, _ := time.Parse(time.RFC3339, arb.Expiry)
-	return parsed
-}
-
-// ArbitrationCache 仲裁数据缓存，提供内存 → 文件 → API 三级回退读取。
+// ArbitrationCache 仲裁数据缓存：内存缓存 + 本地文件两级，消费路径不触网。
 type ArbitrationCache struct {
 	mu     sync.RWMutex
-	data   []Arbitration // 裁剪后的内存缓存
+	data   []Arbitration // 内存缓存（已按窗口裁剪）
 	client *http.Client
 }
 
@@ -80,47 +56,41 @@ func NewArbitrationCache(client *http.Client) *ArbitrationCache {
 	return &ArbitrationCache{client: client}
 }
 
-// Init 启动时恢复仲裁数据：优先从文件恢复，文件不可用（条目全部过期、或旧版类型全空的坏缓存）
-// 则从 API 获取（对齐 Java init）。
-func (cache *ArbitrationCache) Init() error {
-	fromFile := cache.loadFromFile()
-	if hasUsableArbitration(fromFile) {
-		cache.setMemoryCache(pruneArbitration(fromFile))
-		logging.InfoPack("warframe.arbitration", "arbitration restored from file (%d entries)", len(cache.snapshot()))
-		return nil
-	}
-	_, err := cache.reload()
-	return err
+// Reload 强制重拉仲裁数据：拉取 → 覆写本地文件 → 刷新内存缓存。
+// 供「更新仲裁」指令与 HTTP 接口调用（见迁移计划 §8.2）。
+func (cache *ArbitrationCache) Reload() error {
+	return cache.reload()
 }
 
-// reload 强制从远程 API 重新获取仲裁数据（对齐 Java reloadArbitration）。
-func (cache *ArbitrationCache) reload() ([]Arbitration, error) {
-	full, err := fetchArbitrations(cache.client)
+// reload 拉取远程原文并刷新缓存。拉取失败或窗口内无数据时返回错误，且不覆写本地文件，
+// 避免把错误页写进缓存。
+func (cache *ArbitrationCache) reload() error {
+	raw, err := fetchArbys(cache.client)
 	if err != nil {
-		logging.WarnPack("warframe.arbitration", "fetch arbitration failed: %v", err)
-		return nil, err
+		logging.WarnPack("warframe.arbitration", "fetch arbys.txt failed: %v", err)
+		return err
 	}
-	if len(full) == 0 {
-		logging.WarnPack("warframe.arbitration", "arbitration API returned empty data")
-		return nil, errors.New("arbitration API returned empty data")
+	list := parseArbys(raw)
+	if len(list) == 0 {
+		logging.WarnPack("warframe.arbitration", "arbys.txt has no entry in window")
+		return errors.New("arbys.txt has no entry in window")
 	}
-	if err := cache.persistToFile(full); err != nil {
-		logging.WarnPack("warframe.arbitration", "persist arbitration failed: %v", err)
+	if err := cache.writeLocalFile(raw); err != nil {
+		logging.WarnPack("warframe.arbitration", "persist arbys.txt failed: %v", err)
 	}
-	pruned := pruneArbitration(full)
-	cache.setMemoryCache(pruned)
-	logging.InfoPack("warframe.arbitration", "arbitration refreshed: %d full, %d pruned", len(full), len(pruned))
-	return pruned, nil
+	cache.setMemoryCache(list)
+	logging.InfoPack("warframe.arbitration", "arbitration refreshed: %d entries in window", len(list))
+	return nil
 }
 
 // GetArbitration 返回当前正在进行的仲裁（最近到期的一条）。
 func (cache *ArbitrationCache) GetArbitration() (Arbitration, bool) {
 	list := cache.load()
-	now := time.Now()
+	now := time.Now().Unix()
 	var best *Arbitration
 	for index := range list {
-		expiry := list[index].expiryTime()
-		if expiry.After(now) && (best == nil || expiry.Sub(now) < best.expiryTime().Sub(now)) {
+		expiry := list[index].Expiry
+		if expiry > now && (best == nil || expiry < best.Expiry) {
 			best = &list[index]
 		}
 	}
@@ -130,16 +100,16 @@ func (cache *ArbitrationCache) GetArbitration() (Arbitration, bool) {
 	return *best, true
 }
 
-// GetArbitrationList 返回有价值的未来仲裁列表（前瞻 10 条）。
+// GetArbitrationList 返回值得参与的未来仲裁列表（按分级阈值过滤，上限 arbitrationListLimit 条）。
 func (cache *ArbitrationCache) GetArbitrationList() []Arbitration {
 	list := cache.load()
-	now := time.Now()
+	now := time.Now().Unix()
 	results := make([]Arbitration, 0, arbitrationListLimit)
 	for _, arb := range list {
-		if !arb.IsWorth() {
+		if !IsWorthTier(ArbitrationTier(arb.NodeKey)) {
 			continue
 		}
-		if arb.activationTime().After(now) {
+		if arb.Activation > now {
 			results = append(results, arb)
 		}
 		if len(results) >= arbitrationListLimit {
@@ -149,29 +119,38 @@ func (cache *ArbitrationCache) GetArbitrationList() []Arbitration {
 	return results
 }
 
-// snapshot 返回当前内存缓存副本（测试与日志用）。
+// snapshot 返回当前内存缓存副本（日志用）。
 func (cache *ArbitrationCache) snapshot() []Arbitration {
 	cache.mu.RLock()
 	defer cache.mu.RUnlock()
 	return append([]Arbitration(nil), cache.data...)
 }
 
-// load 三级回退读取：内存 → 文件 → API。
+// load 消费路径读取：内存缓存 → 本地文件 → 空列表。全程不触网，
+// 首启拉取未完成或失败时退化为读本地文件，文件也不可用则返回空列表。
 func (cache *ArbitrationCache) load() []Arbitration {
-	if cached := cache.snapshot(); hasUsableArbitration(cached) {
+	if cached := cache.snapshot(); len(cached) > 0 {
 		return cached
 	}
-	fromFile := cache.loadFromFile()
-	if hasUsableArbitration(fromFile) {
-		pruned := pruneArbitration(fromFile)
-		cache.setMemoryCache(pruned)
-		return pruned
-	}
-	pruned, err := cache.reload()
-	if err != nil {
+	list := cache.readLocalFile()
+	if len(list) == 0 {
+		logging.WarnPack("warframe.arbitration", "no arbitration data available (local file missing or out of window)")
 		return nil
 	}
-	return pruned
+	cache.setMemoryCache(list)
+	return list
+}
+
+// readLocalFile 读取并解析本地缓存文件；文件缺失或窗口内无数据时返回 nil。
+func (cache *ArbitrationCache) readLocalFile() []Arbitration {
+	raw, err := os.ReadFile(arbitrationFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logging.WarnPack("warframe.arbitration", "read %s failed: %v", arbitrationFile, err)
+		}
+		return nil
+	}
+	return parseArbys(raw)
 }
 
 func (cache *ArbitrationCache) setMemoryCache(list []Arbitration) {
@@ -180,79 +159,72 @@ func (cache *ArbitrationCache) setMemoryCache(list []Arbitration) {
 	cache.mu.Unlock()
 }
 
-// hasUsableArbitration 判断列表裁剪后是否仍有可用数据：至少一条未过期且任务类型非空。
-// 在 pruneArbitration 的保留集上检查，避免「未过期但类型为空」与「类型非空但会被裁掉」
-// 分别通过两个条件而误判为可用。旧版缓存文件因 JSON 字段名错误（API 为 missionType）
-// 导致类型全空，此处视为坏数据，调用方据此触发重新拉取。
-func hasUsableArbitration(list []Arbitration) bool {
-	for _, arb := range pruneArbitration(list) {
-		if arb.Type != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// pruneArbitration 裁剪窗口：expiry > now 且 activation < now+7d。
-func pruneArbitration(full []Arbitration) []Arbitration {
+// parseArbys 解析 arbys.txt 原文，边解析边按窗口过滤：畸形行（空行、缺列、时间戳非数字）
+// 直接跳过，已过期与超出前瞻窗口的行不入结果，不构建全量切片。
+// 派系按节点去重查询 nodes 表，避免逐行查库。
+func parseArbys(raw []byte) []Arbitration {
 	now := time.Now()
-	cutoff := now.Add(arbitrationSevenDays)
-	results := make([]Arbitration, 0, len(full))
-	for _, arb := range full {
-		if arb.expiryTime().After(now) && arb.activationTime().Before(cutoff) {
-			results = append(results, arb)
+	nowUnix := now.Unix()
+	cutoffUnix := now.Add(arbitrationWindow).Unix()
+
+	results := make([]Arbitration, 0, 64)
+	factions := make(map[string]drawplugin.Faction)
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
+		comma := strings.IndexByte(line, ',')
+		if comma <= 0 || comma == len(line)-1 {
+			continue
+		}
+		activation, err := strconv.ParseInt(strings.TrimSpace(line[:comma]), 10, 64)
+		if err != nil {
+			continue
+		}
+		nodeKey := strings.TrimSpace(line[comma+1:])
+		if nodeKey == "" {
+			continue
+		}
+		expiry := activation + arbitrationDuration
+		if expiry <= nowUnix || activation >= cutoffUnix {
+			continue
+		}
+		faction, ok := factions[nodeKey]
+		if !ok {
+			faction = nodeFactionByKey(nodeKey)
+			factions[nodeKey] = faction
+		}
+		results = append(results, Arbitration{
+			Activation: activation,
+			NodeKey:    nodeKey,
+			Expiry:     expiry,
+			Faction:    faction,
+		})
 	}
 	return results
 }
 
-// loadFromFile 从 ./data/arbitration 读取 Base64 JSON；失败返回 nil。
-func (cache *ArbitrationCache) loadFromFile() []Arbitration {
-	raw, err := os.ReadFile(arbitrationFile)
-	if err != nil {
-		return nil
-	}
-	decoded, err := base64.StdEncoding.DecodeString(string(raw))
-	if err != nil {
-		logging.WarnPack("warframe.arbitration", "decode arbitration file failed: %v", err)
-		return nil
-	}
-	var list []Arbitration
-	if err := json.Unmarshal(decoded, &list); err != nil {
-		logging.WarnPack("warframe.arbitration", "parse arbitration file failed: %v", err)
-		return nil
-	}
-	return list
-}
-
-// persistToFile 将完整数据 Base64 编码后写入文件（对齐 Java persistToFile）。
-func (cache *ArbitrationCache) persistToFile(list []Arbitration) error {
-	encoded, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
+// writeLocalFile 将远程原文写入本地缓存文件。先写临时文件再改名，
+// 避免并发消费读到写了一半的内容。
+func (cache *ArbitrationCache) writeLocalFile(raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(arbitrationFile), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(arbitrationFile, []byte(base64.StdEncoding.EncodeToString(encoded)), 0o644)
+	tmp := arbitrationFile + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, arbitrationFile)
 }
 
-// fetchArbitrations 从远程 API 拉取仲裁列表（对齐 Java ApiUrl.arbitrationPreList）。
+// fetchArbys 从 browse.wf 拉取 arbys.txt 原文。
 // 网络错误与 429/5xx 自动重试 3 次（指数退避）。
-func fetchArbitrations(client *http.Client) ([]Arbitration, error) {
+func fetchArbys(client *http.Client) ([]byte, error) {
 	headers := map[string]string{
 		"User-Agent": fmt.Sprintf("NyxBot/%s", userAgentVersion()),
-		"Accept":     "application/json",
 	}
-	body, err := doRequestWithRetry(context.Background(), client, http.MethodGet, arbitrationURL, headers)
-	if err != nil {
-		return nil, err
-	}
-	var list []Arbitration
-	if err := json.Unmarshal(body, &list); err != nil {
-		return nil, fmt.Errorf("parse arbitration response: %w", err)
-	}
-	return list, nil
+	return doRequestWithRetry(context.Background(), client, http.MethodGet, arbitrationURL, headers)
 }
 
 // userAgentVersion 返回进程版本号；未注入时回退 "dev"。
@@ -270,16 +242,18 @@ var (
 	defaultArbitration     *ArbitrationCache
 )
 
-// DefaultArbitration 返回进程级默认仲裁缓存，首次调用时懒初始化为文件或远程数据。
-// 初始化失败仅导致空数据（指令会提示暂无仲裁），不阻塞调用方。
-// 注意：首次调用会同步尝试初始化（含网络重试），最坏可能阻塞数秒；如需预热请提前调用。
+// DefaultArbitration 返回进程级默认仲裁缓存。首次调用在 sync.Once 内构建缓存并启动
+// 后台拉取（同步路径零网络，不阻塞调用方）；拉取失败时消费路径读本地文件，
+// 文件也不可用则返回空列表（指令提示暂无仲裁），由「更新仲裁」指令补救。
 func DefaultArbitration() *ArbitrationCache {
 	defaultArbitrationOnce.Do(func() {
 		cache := NewArbitrationCache(&http.Client{Timeout: 15 * time.Second})
-		if err := cache.Init(); err != nil {
-			logging.WarnPack("warframe.arbitration", "default arbitration init failed: %v", err)
-		}
 		defaultArbitration = cache
+		go func() {
+			if err := cache.Reload(); err != nil {
+				logging.WarnPack("warframe.arbitration", "default arbitration init failed: %v", err)
+			}
+		}()
 	})
 	return defaultArbitration
 }

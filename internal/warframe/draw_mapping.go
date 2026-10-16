@@ -3,24 +3,33 @@
 package warframe
 
 import (
+	"time"
+
 	"nyxbot-go/internal/draw"
 	"nyxbot-go/internal/enum/drawplugin"
 	modelwarframe "nyxbot-go/internal/model/warframe"
 )
 
-// ArbitrationToDraw 将仲裁领域数据转为绘图 DTO。
-// 仲裁 API（node/planet/enemy/missionType）本身返回中文，无需翻译。
-// 时间走 activationTime（含 ID 时间戳兜底）/expiryTime，与缓存过滤逻辑保持一致。
+// ArbitrationToDraw 将仲裁领域数据转为绘图 DTO，并补齐全部显示值。
+// 仲裁条目只承载 arbys.txt 的两列，节点名（含星系）/ 任务类型 / 评级均在转换时查表补齐；
+// draw 包不 import 本包（会循环依赖），显示值只能在转换时填好。
 func ArbitrationToDraw(arb Arbitration) *draw.Arbitration {
 	return &draw.Arbitration{
-		Activation: arb.activationTime(),
-		Expiry:     arb.expiryTime(),
-		ID:         arb.ID,
-		Node:       arb.Node,
-		Planet:     arb.Planet,
-		Enemy:      arb.Enemy,
-		Type:       arb.Type,
+		Activation:  time.Unix(arb.Activation, 0),
+		Expiry:      time.Unix(arb.Expiry, 0),
+		Node:        TranslateNode(arb.NodeKey),
+		MissionName: nodeMissionNameByKey(arb.NodeKey),
+		Faction:     arb.Faction,
+		Tier:        ArbitrationTier(arb.NodeKey),
 	}
+}
+
+// nodeMissionNameByKey 查询节点任务类型的中文名；未收录的序号回退空串（卡片按「未知」渲染）。
+func nodeMissionNameByKey(nodeKey string) string {
+	if info, ok := drawplugin.MissionTypeMap[nodeMissionTypeByKey(nodeKey)]; ok {
+		return info.Name
+	}
+	return ""
 }
 
 // RelicsToDraw 将遗物模型转为绘图 DTO，并把稀有度序数映射为枚举。
