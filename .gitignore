@@ -23,6 +23,10 @@ admin-credentials.txt
 AGENTS.md
 CLAUDE.md
 plans/
+# 测试代码：本地保留但不入库（2026-10-17 起）。仓库不再携带测试套件，
+# 克隆者需自备；CI（release-build.yml）只跑 go build，不跑 go test，故不受影响。
+# 本地开发照常 `go test ./tests`。
+/tests/
 
 # 测试生成的图片临时目录
 /temp/
