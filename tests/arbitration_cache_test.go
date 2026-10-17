@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -147,11 +148,19 @@ func TestArbitrationLoadWithoutLocalFile(t *testing.T) {
 }
 
 // TestArbitrationReloadPersistsAndRefreshes Reload 应拉取远程原文、原样覆写本地文件并刷新内存缓存。
+// 先用**另一份**文件内容把内存缓存填满：若 Reload 只写盘不刷内存，读取会命中内存里那份旧数据
+// （load 优先返回非空快照），断言随即失败——不靠文件回退蒙混过关。
 func TestArbitrationReloadPersistsAndRefreshes(t *testing.T) {
 	useTempWorkdir(t)
+	writeArbysFile(t, arbysLine(-5*time.Minute, "StaleNode"))
+
 	body := arbysLine(-5*time.Minute, "SolNode64")
 	transport := &stubTransport{status: http.StatusOK, body: body}
 	cache := warframe.NewArbitrationCache(&http.Client{Transport: transport})
+
+	if arb, ok := cache.GetArbitration(); !ok || arb.NodeKey != "StaleNode" {
+		t.Fatalf("前置：应先用旧文件填满内存缓存, got ok=%v arb=%+v", ok, arb)
+	}
 
 	if err := cache.Reload(); err != nil {
 		t.Fatalf("Reload 失败: %v", err)
@@ -164,7 +173,84 @@ func TestArbitrationReloadPersistsAndRefreshes(t *testing.T) {
 		t.Fatalf("落盘内容应为远程原文, got %q", string(raw))
 	}
 	if arb, ok := cache.GetArbitration(); !ok || arb.NodeKey != "SolNode64" {
-		t.Fatalf("Reload 后应刷新内存缓存: ok=%v arb=%+v", ok, arb)
+		t.Fatalf("Reload 后内存缓存应换成新数据（拿到 StaleNode 说明只写盘未刷内存）: ok=%v arb=%+v", ok, arb)
+	}
+}
+
+// TestArbitrationRescansLocalFile 内存快照超过重解析间隔后应重新解析本地文件，使 30 天窗口随时间
+// 前滚——否则进程连续运行超过窗口长度后「仲裁」「仲裁表」会因窗口内无条目而变空（PR #15 评审）。
+func TestArbitrationRescansLocalFile(t *testing.T) {
+	useTempWorkdir(t)
+	writeArbysFile(t, arbysLine(-5*time.Minute, "FirstNode"))
+
+	cache := warframe.NewArbitrationCache(nil)
+	if arb, ok := cache.GetArbitration(); !ok || arb.NodeKey != "FirstNode" {
+		t.Fatalf("首次读取应来自本地文件, got ok=%v arb=%+v", ok, arb)
+	}
+
+	// 间隔未到时：即使文件已变，也继续复用内存快照
+	writeArbysFile(t, arbysLine(-5*time.Minute, "SecondNode"))
+	if arb, _ := cache.GetArbitration(); arb.NodeKey != "FirstNode" {
+		t.Fatalf("间隔未到时应复用内存快照, got %q", arb.NodeKey)
+	}
+
+	// 模拟快照已过期（真实场景下这次重解析换来的是前滚后的窗口）
+	previous := warframe.SetArbitrationRescanInterval(0)
+	t.Cleanup(func() { warframe.SetArbitrationRescanInterval(previous) })
+	if arb, ok := cache.GetArbitration(); !ok || arb.NodeKey != "SecondNode" {
+		t.Fatalf("超过间隔后应重新解析本地文件, got ok=%v arb=%+v", ok, arb)
+	}
+}
+
+// TestArbitrationReloadFailsWhenPersistFails 落盘失败时 Reload 应报错且不发布内存快照：
+// 磁盘与内存要么一起更新、要么都不动，避免「报成功但重启读回旧数据」（PR #15 评审）。
+func TestArbitrationReloadFailsWhenPersistFails(t *testing.T) {
+	useTempWorkdir(t)
+	// 用同名普通文件占住 data/ 目录位置，使 MkdirAll / WriteFile 必然失败
+	if err := os.WriteFile("data", []byte("occupied"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	transport := &stubTransport{status: http.StatusOK, body: arbysLine(-5*time.Minute, "SolNode64")}
+	cache := warframe.NewArbitrationCache(&http.Client{Transport: transport})
+	if err := cache.Reload(); err == nil {
+		t.Fatal("落盘失败时 Reload 应返回错误")
+	}
+	if arb, ok := cache.GetArbitration(); ok {
+		t.Fatalf("落盘失败时不应发布内存快照, got %+v", arb)
+	}
+}
+
+// TestArbitrationReloadSerialized 并发 Reload 应被串行化：共用同一临时文件也不会互相破坏，
+// 且不做「较旧结果覆盖较新结果」。（并发正确性由 reloadMu 保证，此处验证并发下不报错、结果一致。）
+func TestArbitrationReloadSerialized(t *testing.T) {
+	useTempWorkdir(t)
+	body := arbysLine(-5*time.Minute, "SolNode64")
+	transport := &stubTransport{status: http.StatusOK, body: body}
+	cache := warframe.NewArbitrationCache(&http.Client{Transport: transport})
+
+	var waitGroup sync.WaitGroup
+	errs := make([]error, 8)
+	for index := range errs {
+		waitGroup.Go(func() {
+			errs[index] = cache.Reload()
+		})
+	}
+	waitGroup.Wait()
+	for index, err := range errs {
+		if err != nil {
+			t.Fatalf("并发 Reload[%d] 失败: %v", index, err)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join("data", "arbys.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(raw)) != body {
+		t.Fatalf("并发刷新后落盘内容应完整, got %q", string(raw))
+	}
+	if arb, ok := cache.GetArbitration(); !ok || arb.NodeKey != "SolNode64" {
+		t.Fatalf("并发刷新后缓存应可用: ok=%v arb=%+v", ok, arb)
 	}
 }
 

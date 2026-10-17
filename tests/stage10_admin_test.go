@@ -142,9 +142,10 @@ func TestArbitrationUpdateCommandsEndToEnd(t *testing.T) {
 	if err := registry.Register(); err != nil {
 		t.Fatal(err)
 	}
-	executor := &fakeDataExecutor{}
+	executor := newBlockingExecutor()
 	registry.SetDataExecutor(executor)
 	t.Cleanup(func() {
+		executor.releaseAll() // 失败路径下放行被阻塞的执行 goroutine，避免泄漏
 		registry.Close()
 		zero.BotConfig = previousConfig
 		zero.APICallers.Delete(botUID)
@@ -166,20 +167,81 @@ func TestArbitrationUpdateCommandsEndToEnd(t *testing.T) {
 		before := len(caller.snapshot())
 		echoPrivateMessage(t, bot, botUID, adminUID, tc.command)
 
+		// 执行器此刻被阻塞：确认回复必须先到。若 handler 改成同步执行（先跑完再回复），
+		// 这里会一直等到超时，测试即失败——这正是本用例要锁住的「先回执、后异步执行」。
+		waitFor(t, func() bool {
+			for _, request := range caller.snapshot()[before:] {
+				if strings.Contains(replyText(request.Params["message"]), "已发布任务") {
+					return true
+				}
+			}
+			return false
+		}, "指令 "+tc.command+" 应在执行器完成前回复「已发布任务，正在更新！」")
+
+		select {
+		case name := <-executor.started:
+			if name != tc.want {
+				t.Fatalf("指令 %q 应派发到 %s, 实际 %s", tc.command, tc.want, name)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("指令 %q 未派发到执行器", tc.command)
+		}
+
+		// 放行后异步执行应正常收尾
+		executor.unblock()
 		want := tc.want
 		waitFor(t, func() bool {
 			return slices.Contains(executor.snapshot(), want)
-		}, "指令 "+tc.command+" 未派发到执行器")
+		}, "放行后指令 "+tc.command+" 应执行完成")
+	}
+}
 
-		replied := false
-		for _, request := range caller.snapshot()[before:] {
-			if strings.Contains(replyText(request.Params["message"]), "已发布任务") {
-				replied = true
-				break
-			}
-		}
-		if !replied {
-			t.Fatalf("指令 %q 应立即回复「已发布任务，正在更新！」", tc.command)
+// blockingExecutor 在被调用时先通知测试、再阻塞，直到 unblock 放行才记录并返回；
+// 用于验证管理指令「立即回执、后台异步执行」的时序（同步执行会卡住回执断言）。
+type blockingExecutor struct {
+	fakeDataExecutor
+	started chan string   // 每次被调用发一个方法名（缓冲，不阻塞）
+	release chan struct{} // 每次放行一个调用（缓冲，不阻塞）
+}
+
+// newBlockingExecutor 创建阻塞执行器。
+func newBlockingExecutor() *blockingExecutor {
+	return &blockingExecutor{
+		started: make(chan string, 8),
+		release: make(chan struct{}, 8),
+	}
+}
+
+func (executor *blockingExecutor) UpdateArbitration(context.Context) error {
+	return executor.block("arbitration")
+}
+
+func (executor *blockingExecutor) UpdateArbitrationTiers(context.Context) error {
+	return executor.block("arbitration-tiers")
+}
+
+// block 通知测试已被调用后阻塞，放行后才记录并返回。
+func (executor *blockingExecutor) block(name string) error {
+	select {
+	case executor.started <- name:
+	default:
+	}
+	<-executor.release
+	executor.record(name)
+	return nil
+}
+
+// unblock 放行一次阻塞中的执行调用。
+func (executor *blockingExecutor) unblock() {
+	executor.release <- struct{}{}
+}
+
+// releaseAll 塞满放行令牌，确保失败路径下被阻塞的执行 goroutine 不再泄漏。
+func (executor *blockingExecutor) releaseAll() {
+	for range cap(executor.release) {
+		select {
+		case executor.release <- struct{}{}:
+		default:
 		}
 	}
 }

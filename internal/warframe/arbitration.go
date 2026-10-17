@@ -2,7 +2,8 @@
 // 数据源为 browse.wf/arbys.txt（逐行 "unix秒,节点ID" 的官方导出）：启动时后台拉取并落
 // 本地文件 ./data/arbys.txt，消费路径只读本地文件（运行期不触网），本地文件也不可用时
 // 返回空列表，由「更新仲裁」指令补救。
-// 窗口裁剪：仅保留 expiry > now 且 activation < now+30d 的条目（解析阶段即丢弃，不建全量切片）。
+// 窗口裁剪：仅保留 expiry > now 且 activation < now+30d 的条目（解析阶段即丢弃，不建全量切片）；
+// 因窗口是在解析那一刻裁剪的，内存快照超过 arbitrationRescanInterval 后会重新解析本地文件前滚。
 package warframe
 
 import (
@@ -17,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"nyxbot-go/internal/enum/drawplugin"
 	"nyxbot-go/internal/logging"
 )
 
@@ -31,21 +31,39 @@ const (
 	arbitrationListLimit = 10                  // 前瞻列表条数
 )
 
-// Arbitration 仲裁条目，只承载数据源的两列与由此推导的到期时间、派系。
-// 节点名（含星系）/ 任务类型 / 评级等显示值一律不落库，由 nodes 表在转换时补齐
-// （见 ArbitrationToDraw）。
-type Arbitration struct {
-	Activation int64              // 开始时间（Unix 秒，arbys.txt 第一列）
-	NodeKey    string             // 节点 SolNode ID（arbys.txt 第二列）
-	Expiry     int64              // 结束时间（= Activation + arbitrationDuration）
-	Faction    drawplugin.Faction // 派系枚举（由 nodes 表派生）
+// arbitrationRescanInterval 内存快照最长复用时长。窗口是「解析那一刻」裁剪的，若不前滚，
+// 进程连续运行超过 arbitrationWindow 后窗口内将再无条目，「仲裁」「仲裁表」会一起变空。
+// 本地文件本身覆盖到 2029 年，重新解析即可把窗口前滚，且全程不触网。
+var arbitrationRescanInterval = time.Hour
+
+// SetArbitrationRescanInterval 调整内存快照的重解析间隔并返回原值（默认 1 小时）；
+// 供测试模拟长期运行、快照已过期的场景（<=0 表示每次读取都重新解析本地文件）。
+func SetArbitrationRescanInterval(interval time.Duration) time.Duration {
+	previous := arbitrationRescanInterval
+	arbitrationRescanInterval = interval
+	return previous
 }
 
-// ArbitrationCache 仲裁数据缓存：内存缓存 + 本地文件两级，消费路径不触网。
+// Arbitration 仲裁条目，只承载数据源的两列与由此推导的到期时间。
+// 节点名（含星系）/ 任务类型 / 派系 / 评级等显示值一律不落库，由 nodes 表在转换时补齐
+// （见 ArbitrationToDraw）。派系同样按需查询而非解析时固化——否则解析早于 nodes 导入时
+// （新库首启必然如此）会把「未知派系」一直缓存到下次刷新。
+type Arbitration struct {
+	Activation int64  // 开始时间（Unix 秒，arbys.txt 第一列）
+	NodeKey    string // 节点 SolNode ID（arbys.txt 第二列）
+	Expiry     int64  // 结束时间（= Activation + arbitrationDuration）
+}
+
+// ArbitrationCache 仲裁数据缓存：内存快照 + 本地文件两级，消费路径不触网。
 type ArbitrationCache struct {
-	mu     sync.RWMutex
-	data   []Arbitration // 内存缓存（已按窗口裁剪）
-	client *http.Client
+	mu      sync.RWMutex
+	data    []Arbitration // 内存快照（已按窗口裁剪）
+	scanned time.Time     // 快照的解析时刻，用于判断是否需要重新解析本地文件
+	client  *http.Client
+
+	// reloadMu 串行化刷新。并发刷新会共用同一个 .tmp 路径互相覆盖，也可能让较旧的一次
+	// 覆盖较新的结果，故把「拉取 → 落盘 → 发布」整段串行执行。
+	reloadMu sync.Mutex
 }
 
 // NewArbitrationCache 创建仲裁缓存；client 为 nil 时使用 http.DefaultClient。
@@ -59,11 +77,14 @@ func NewArbitrationCache(client *http.Client) *ArbitrationCache {
 // Reload 强制重拉仲裁数据：拉取 → 覆写本地文件 → 刷新内存缓存。
 // 供「更新仲裁」指令与 HTTP 接口调用（见迁移计划 §8.2）。
 func (cache *ArbitrationCache) Reload() error {
+	cache.reloadMu.Lock()
+	defer cache.reloadMu.Unlock()
 	return cache.reload()
 }
 
-// reload 拉取远程原文并刷新缓存。拉取失败或窗口内无数据时返回错误，且不覆写本地文件，
-// 避免把错误页写进缓存。
+// reload 拉取远程原文并刷新缓存，调用方须持有 reloadMu。
+// 拉取失败与窗口内无数据都不覆写本地文件（避免把错误页写进缓存）；落盘失败则连内存快照
+// 一起不发布——磁盘与内存要么一起更新、要么都不动，避免「报成功但重启读回旧数据」。
 func (cache *ArbitrationCache) reload() error {
 	raw, err := fetchArbys(cache.client)
 	if err != nil {
@@ -77,8 +98,9 @@ func (cache *ArbitrationCache) reload() error {
 	}
 	if err := cache.writeLocalFile(raw); err != nil {
 		logging.WarnPack("warframe.arbitration", "persist arbys.txt failed: %v", err)
+		return fmt.Errorf("persist arbys.txt: %w", err)
 	}
-	cache.setMemoryCache(list)
+	cache.publish(list)
 	logging.InfoPack("warframe.arbitration", "arbitration refreshed: %d entries in window", len(list))
 	return nil
 }
@@ -119,26 +141,30 @@ func (cache *ArbitrationCache) GetArbitrationList() []Arbitration {
 	return results
 }
 
-// snapshot 返回当前内存缓存副本（日志用）。
-func (cache *ArbitrationCache) snapshot() []Arbitration {
-	cache.mu.RLock()
-	defer cache.mu.RUnlock()
-	return append([]Arbitration(nil), cache.data...)
-}
-
-// load 消费路径读取：内存缓存 → 本地文件 → 空列表。全程不触网，
-// 首启拉取未完成或失败时退化为读本地文件，文件也不可用则返回空列表。
+// load 消费路径读取：内存快照 → 本地文件 → 空列表，全程不触网。
+// 快照超过 arbitrationRescanInterval 未更新时重新解析本地文件，让 30 天窗口随时间前滚；
+// 「检查 + 重解析 + 发布」全程持写锁，避免与 reload 交错时反过来用旧文件内容盖掉新快照。
 func (cache *ArbitrationCache) load() []Arbitration {
-	if cached := cache.snapshot(); len(cached) > 0 {
-		return cached
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	if len(cache.data) > 0 && time.Since(cache.scanned) < arbitrationRescanInterval {
+		return cache.data
 	}
-	list := cache.readLocalFile()
-	if len(list) == 0 {
+
+	if list := cache.readLocalFile(); len(list) > 0 {
+		cache.data = list
+		cache.scanned = time.Now()
+		logging.DebugPack("warframe.arbitration", "arbitration re-parsed from local file: %d entries in window", len(list))
+		return cache.data
+	}
+
+	// 本地文件不可用：沿用既有快照（过期条目由调用侧按时间过滤自然淘汰），并延后下次重试
+	cache.scanned = time.Now()
+	if len(cache.data) == 0 {
 		logging.WarnPack("warframe.arbitration", "no arbitration data available (local file missing or out of window)")
-		return nil
 	}
-	cache.setMemoryCache(list)
-	return list
+	return cache.data
 }
 
 // readLocalFile 读取并解析本地缓存文件；文件缺失或窗口内无数据时返回 nil。
@@ -153,22 +179,23 @@ func (cache *ArbitrationCache) readLocalFile() []Arbitration {
 	return parseArbys(raw)
 }
 
-func (cache *ArbitrationCache) setMemoryCache(list []Arbitration) {
+// publish 发布新快照并记录解析时刻。
+func (cache *ArbitrationCache) publish(list []Arbitration) {
 	cache.mu.Lock()
 	cache.data = list
+	cache.scanned = time.Now()
 	cache.mu.Unlock()
 }
 
 // parseArbys 解析 arbys.txt 原文，边解析边按窗口过滤：畸形行（空行、缺列、时间戳非数字）
 // 直接跳过，已过期与超出前瞻窗口的行不入结果，不构建全量切片。
-// 派系按节点去重查询 nodes 表，避免逐行查库。
+// 纯文本处理、不查库，故消费路径可频繁重解析（见 load）。
 func parseArbys(raw []byte) []Arbitration {
 	now := time.Now()
 	nowUnix := now.Unix()
 	cutoffUnix := now.Add(arbitrationWindow).Unix()
 
 	results := make([]Arbitration, 0, 64)
-	factions := make(map[string]drawplugin.Faction)
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -190,23 +217,17 @@ func parseArbys(raw []byte) []Arbitration {
 		if expiry <= nowUnix || activation >= cutoffUnix {
 			continue
 		}
-		faction, ok := factions[nodeKey]
-		if !ok {
-			faction = nodeFactionByKey(nodeKey)
-			factions[nodeKey] = faction
-		}
 		results = append(results, Arbitration{
 			Activation: activation,
 			NodeKey:    nodeKey,
 			Expiry:     expiry,
-			Faction:    faction,
 		})
 	}
 	return results
 }
 
 // writeLocalFile 将远程原文写入本地缓存文件。先写临时文件再改名，
-// 避免并发消费读到写了一半的内容。
+// 避免并发消费读到写了一半的内容（并发刷新已由 reloadMu 串行化，故可共用同一临时路径）。
 func (cache *ArbitrationCache) writeLocalFile(raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(arbitrationFile), 0o755); err != nil {
 		return err

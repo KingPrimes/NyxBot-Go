@@ -61,7 +61,6 @@ func TestArbitrationToDraw(t *testing.T) {
 		Activation: start.Unix(),
 		NodeKey:    "SolNode64",
 		Expiry:     start.Add(time.Hour).Unix(),
-		Faction:    drawplugin.FactionMurmur,
 	})
 	if dto == nil {
 		t.Fatal("ArbitrationToDraw returned nil")
@@ -73,7 +72,7 @@ func TestArbitrationToDraw(t *testing.T) {
 		t.Fatalf("任务类型应由 nodes.mission_index 补齐, got %q", dto.MissionName)
 	}
 	if dto.Faction != drawplugin.FactionMurmur {
-		t.Fatalf("派系应直传枚举, got %q", dto.Faction)
+		t.Fatalf("派系应由 nodes.faction_index 补齐, got %q", dto.Faction)
 	}
 	if dto.Tier != "S" {
 		t.Fatalf("评级应由 arbitration_tier 表补齐, got %q", dto.Tier)
@@ -182,7 +181,6 @@ func TestDrawChainNonEmpty(t *testing.T) {
 		Activation: base.Unix(),
 		Expiry:     base.Add(30 * time.Minute).Unix(),
 		NodeKey:    "SolNode64",
-		Faction:    drawplugin.FactionGrineer,
 	})
 	if image := draw.DrawArbitration(arbDTO); len(image) == 0 {
 		t.Fatal("DrawArbitration returned empty image")

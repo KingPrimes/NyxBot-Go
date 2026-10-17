@@ -146,6 +146,11 @@ func TestDrawArbitrationsImage(t *testing.T) {
 	if heightAtLimit != heightAtTen {
 		t.Fatalf("列表图应截断到 10 条：14 条出图高 %d，10 条出图高 %d", heightAtLimit, heightAtTen)
 	}
+	// 仅断言「14 条 == 10 条」在上限被退回 5 时同样成立，故还需断言 10 条确实比 5 条高
+	_, heightAtFive := assertPNG(t, "draw_arbitrations_5.png", draw.DrawArbitrations(arbitrationListFixture(5)))
+	if heightAtFive >= heightAtTen {
+		t.Fatalf("10 条应比 5 条高（否则上限可能被退回 5）：5 条高 %d，10 条高 %d", heightAtFive, heightAtTen)
+	}
 
 	// 空列表与全 nil 列表应返回 nil 而非崩溃
 	if data := draw.DrawArbitrations(nil); data != nil {

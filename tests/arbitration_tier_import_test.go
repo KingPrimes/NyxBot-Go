@@ -8,6 +8,8 @@ import (
 	"errors"
 	"testing"
 
+	"gorm.io/gorm"
+
 	"nyxbot-go/internal/database"
 	modelwarframe "nyxbot-go/internal/model/warframe"
 	"nyxbot-go/internal/warframe"
@@ -25,6 +27,16 @@ func assertTier(t *testing.T, nodeKey, want string) {
 	}
 }
 
+// assertTierAbsent 断言库中不存在某节点的分级行。
+func assertTierAbsent(t *testing.T, nodeKey string) {
+	t.Helper()
+	err := database.DB.Where(&modelwarframe.ArbitrationTier{Key: nodeKey}).
+		First(&modelwarframe.ArbitrationTier{}).Error
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("%s 应已被快照式替换删除, got err=%v", nodeKey, err)
+	}
+}
+
 // countArbitrationTiers 返回分级表行数。
 func countArbitrationTiers(t *testing.T) int64 {
 	t.Helper()
@@ -35,9 +47,10 @@ func countArbitrationTiers(t *testing.T) int64 {
 	return count
 }
 
-// TestImportArbitrationTiersUpsertsByKey 验证分级导入走 warframe/arbitration_tiers.json、
-// 空 key 记录被过滤，且重复导入按 key 覆盖（评级变更更新原行、不产生重复行）。
-func TestImportArbitrationTiersUpsertsByKey(t *testing.T) {
+// TestImportArbitrationTiersReplacesSnapshot 验证分级导入走 warframe/arbitration_tiers.json、
+// 空 key 记录被过滤，且 CDN 文件被当作**权威快照**：二次导入未出现的 key 会被删除
+// （否则节点被移除后旧评级会残留，继续影响前瞻列表——PR #15 评审），评级变更则覆盖原行。
+func TestImportArbitrationTiersReplacesSnapshot(t *testing.T) {
 	setupImportFixDB(t)
 	if err := database.DB.AutoMigrate(&modelwarframe.ArbitrationTier{}); err != nil {
 		t.Fatal(err)
@@ -67,7 +80,7 @@ func TestImportArbitrationTiersUpsertsByKey(t *testing.T) {
 		t.Fatalf("空 key 记录应被过滤，落库应为 2 行, got %d", count)
 	}
 
-	// 二次导入：评级变更覆盖原行，未出现的行保留（与 ImportAlias 一致的 upsert 语义）
+	// 二次导入：快照未包含 SolNode106（应被删除），SolNode450 评级改为 B（应覆盖原行）
 	warframe.SetCDNFileFetcher(func(string) ([]byte, error) {
 		return []byte(`[{"key":"SolNode450","tier":"B"}]`), nil
 	})
@@ -75,10 +88,10 @@ func TestImportArbitrationTiersUpsertsByKey(t *testing.T) {
 		t.Fatalf("二次导入: %v", err)
 	}
 	assertTier(t, "SolNode450", "B")
-	assertTier(t, "SolNode106", "A")
-	if count := countArbitrationTiers(t); count != 2 {
-		t.Fatalf("重复导入不应产生重复行, got %d", count)
+	if count := countArbitrationTiers(t); count != 1 {
+		t.Fatalf("快照式替换后应只剩 1 行, got %d", count)
 	}
+	assertTierAbsent(t, "SolNode106")
 }
 
 // TestImportArbitrationTiersRejectsBadPayload 空数组、非法 JSON、全空 key 与拉取失败

@@ -11,15 +11,17 @@ import (
 )
 
 // ArbitrationToDraw 将仲裁领域数据转为绘图 DTO，并补齐全部显示值。
-// 仲裁条目只承载 arbys.txt 的两列，节点名（含星系）/ 任务类型 / 评级均在转换时查表补齐；
+// 仲裁条目只承载 arbys.txt 的两列，节点名（含星系）/ 任务类型 / 派系 / 评级均在转换时查表补齐；
 // draw 包不 import 本包（会循环依赖），显示值只能在转换时填好。
+// 派系同样在此按需查询而非解析时固化：新库首启时 nodes 导入与仲裁拉取并发，
+// 若在解析阶段取派系，会把「未知派系」一直缓存到下次刷新。
 func ArbitrationToDraw(arb Arbitration) *draw.Arbitration {
 	return &draw.Arbitration{
 		Activation:  time.Unix(arb.Activation, 0),
 		Expiry:      time.Unix(arb.Expiry, 0),
 		Node:        TranslateNode(arb.NodeKey),
 		MissionName: nodeMissionNameByKey(arb.NodeKey),
-		Faction:     arb.Faction,
+		Faction:     nodeFactionByKey(arb.NodeKey),
 		Tier:        ArbitrationTier(arb.NodeKey),
 	}
 }
