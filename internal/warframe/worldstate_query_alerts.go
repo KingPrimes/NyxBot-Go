@@ -23,21 +23,17 @@ type wsAlertEnvelope struct {
 
 // wsAlert 对齐 Java model.Alert 的 JSON 字段。
 type wsAlert struct {
+	Expiry      wsTime              `json:"Expiry"`
 	MissionInfo *wsAlertMissionInfo `json:"MissionInfo"`
 }
 
 // wsAlertMissionInfo 对齐 Java Alert.MissionInfo 的 JSON 字段。
+// 奖励复用入侵侧的 wsReward（同为 Java model.worldstate.Reward，含 countedItems）。
 type wsAlertMissionInfo struct {
-	Location      string         `json:"location"`
-	MissionType   string         `json:"missionType"`
-	Faction       string         `json:"faction"`
-	MissionReward *wsAlertReward `json:"missionReward"`
-}
-
-// wsAlertReward 对齐 Java Alert.MissionInfo.Reward 的 JSON 字段。
-type wsAlertReward struct {
-	Credits *int     `json:"credits"`
-	Items   []string `json:"items"`
+	Location      string    `json:"location"`
+	MissionType   string    `json:"missionType"`
+	Faction       string    `json:"faction"`
+	MissionReward *wsReward `json:"missionReward"`
 }
 
 // wsLiteSorite 对齐 Java model.worldstate.LiteSorite 的 JSON 字段。
@@ -72,6 +68,7 @@ func GetAlerts() ([]*draw.Alert, error) {
 
 // translateAlert 翻译单条警报（对齐 Java translateAlerts：
 // 奖励物品名查 state_translation，location 查 nodes 表拼「名称(星系)」）。
+// 剩余时间由 Expiry 推导（对齐 Java Alert.getTimeLeft() = expiry.getTimeLeft()）。
 // 缺少 MissionInfo 时返回 nil（Java 侧同一过滤条件）。
 func translateAlert(alert *wsAlert) *draw.Alert {
 	if alert == nil || alert.MissionInfo == nil {
@@ -79,37 +76,46 @@ func translateAlert(alert *wsAlert) *draw.Alert {
 	}
 	info := alert.MissionInfo
 
-	reward := &draw.AlertReward{Credits: alertRewardCredits(info.MissionReward)}
-	for _, item := range alertRewardItems(info.MissionReward) {
-		// 对齐 Java translateAlerts：按完整 uniqueName 直接查表（不做 last3 截取）
-		reward.Items = append(reward.Items, TranslateStateNameDirect(item))
-	}
-
 	return &draw.Alert{
+		TimeLeft: remainingUntil(alert.Expiry),
 		MissionInfo: &draw.AlertMissionInfo{
 			// 派系不在 Alert 载荷中，改由节点表 factionIndex 推导（对齐 nodes 表用法）
 			Location:      TranslateNode(info.Location),
 			MissionType:   drawplugin.MissionType(info.MissionType),
 			Faction:       nodeFactionByKey(info.Location),
-			MissionReward: reward,
+			MissionReward: translateAlertReward(info.MissionReward),
 		},
 	}
 }
 
-// alertRewardCredits 返回星币指针（奖励结构为 nil 时为 nil）。
-func alertRewardCredits(reward *wsAlertReward) *int {
+// translateAlertReward 翻译警报奖励：星币/经验直传，物品名按**完整 uniqueName** 直查
+// state_translation（对齐 Java translateAlerts 的 findByUniqueName，不做 last3 截取），
+// countedItems 保留数量供绘图按「名称 (数量)」渲染。
+//
+// 不复用入侵侧的 translateReward：那条链路走的是末三段语义（TranslateStateName），
+// 与 Java 在警报上用的完整路径查询不同，混用会改变译文命中结果。
+func translateAlertReward(reward *wsReward) *draw.Reward {
 	if reward == nil {
 		return nil
 	}
-	return reward.Credits
-}
-
-// alertRewardItems 返回奖励物品列表（奖励结构为 nil 时为 nil）。
-func alertRewardItems(reward *wsAlertReward) []string {
-	if reward == nil {
-		return nil
+	out := &draw.Reward{Credits: reward.Credits, Xp: reward.Xp}
+	for _, item := range reward.Items {
+		if item != "" {
+			out.Items = append(out.Items, TranslateStateNameDirect(item))
+		}
 	}
-	return reward.Items
+	for i := range reward.CountedItems {
+		item := &reward.CountedItems[i]
+		if item.ItemType == "" {
+			continue
+		}
+		count := item.ItemCount
+		out.CountedItems = append(out.CountedItems, &draw.RewardItem{
+			Name:  TranslateStateNameDirect(item.ItemType),
+			Count: &count,
+		})
+	}
+	return out
 }
 
 // GetLiteSorite 解析执刑官猎杀（对齐 Java WorldStateUtils.getLiteSorite）：

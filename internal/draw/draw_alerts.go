@@ -16,6 +16,9 @@ const (
 	alertCardRadius = 14
 )
 
+// alertRewardItemLimit 奖励区最多列出的物品数（对齐 Java buildRewardText 的 limit(5)）。
+const alertRewardItemLimit = 5
+
 // Alert 警报绘图输入（对齐 Java model.Alert 原始字段）。
 type Alert struct {
 	TimeLeft    string            // 剩余时间文本
@@ -27,13 +30,7 @@ type AlertMissionInfo struct {
 	Location      string                 // 节点地点
 	MissionType   drawplugin.MissionType // 任务类型
 	Faction       drawplugin.Faction     // 派系
-	MissionReward *AlertReward           // 奖励
-}
-
-// AlertReward 警报奖励（对齐 Java MissionReward）。
-type AlertReward struct {
-	Credits *int     // 星币（指针可空）
-	Items   []string // 物品列表（已翻译）
+	MissionReward *Reward                // 奖励（复用入侵侧同款 Reward / RewardItem）
 }
 
 // DrawAlerts 绘制警报列表图（对齐 Java drawAlertsImage 两列卡片网格）。
@@ -189,25 +186,52 @@ func truncateToWidth(canvas *Canvas, text string, maxWidth float64) string {
 	return string(runes) + ".."
 }
 
-// buildRewardText 拼接奖励文本：星币 + 前 5 个物品（对齐 Java buildRewardText）。
+// buildRewardText 拼接奖励文本：星币 + 带数量物品 + 普通物品（物品合计最多 alertRewardItemLimit 个）。
+//
+// 与 Java buildRewardText 的差异：Java 只读 `items`，漏掉了 `countedItems`——而真实警报奖励恰恰以
+// `countedItems` 表达（如活动警报的「17000 星币 + 月华脯 (50)」），照搬会导致卡片只显示星币。
+// 此处按「带数量物品优先」补齐，格式对齐游戏内显示的「名称 (数量)」。
 func buildRewardText(alert *Alert) string {
 	if alert.MissionInfo == nil || alert.MissionInfo.MissionReward == nil {
 		return ""
 	}
 	reward := alert.MissionInfo.MissionReward
 	var sb []string
-	if reward.Credits != nil && *reward.Credits > 0 {
-		sb = append(sb, strconv.Itoa(*reward.Credits)+"星币")
+	if reward.Credits > 0 {
+		sb = append(sb, strconv.Itoa(reward.Credits)+"星币")
 	}
-	count := 0
-	for _, it := range reward.Items {
-		if count >= 5 {
+	listed := 0
+	for _, item := range reward.CountedItems {
+		if listed >= alertRewardItemLimit {
 			break
 		}
-		if it != "" {
-			sb = append(sb, it)
-			count++
+		if text := countedItemText(item); text != "" {
+			sb = append(sb, text)
+			listed++
+		}
+	}
+	for _, name := range reward.Items {
+		if listed >= alertRewardItemLimit {
+			break
+		}
+		if name != "" {
+			sb = append(sb, name)
+			listed++
 		}
 	}
 	return strings.Join(sb, "  ")
+}
+
+// countedItemText 带数量物品的显示文本「名称 (数量)」（与游戏内一致）。
+// 名称为空返回空串（调用侧跳过）；数量缺失显示 `(?)`。
+// 注：入侵卡沿用「50x 名称」（draw_invasion.go 的 rewardItemText），两处格式有意不同——
+// 警报卡此处按主人要求对齐游戏内显示。
+func countedItemText(item *RewardItem) string {
+	if item == nil || item.Name == "" {
+		return ""
+	}
+	if item.Count == nil {
+		return item.Name + " (?)"
+	}
+	return item.Name + " (" + strconv.Itoa(*item.Count) + ")"
 }
