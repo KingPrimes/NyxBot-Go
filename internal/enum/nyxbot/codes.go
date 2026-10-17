@@ -46,7 +46,6 @@ const (
 	CmdWfRivenMarket            Codes = "WARFRAME_RIVEN_MARKET_PLUGIN"
 	CmdWfLichs                  Codes = "WARFRAME_LICHES_PLUGIN"
 	CmdWfSisters                Codes = "WARFRAME_SISTERS_PLUGIN"
-	CmdWfPerlinSequence         Codes = "WARFRAME_THE_PERLIN_SEQUENCE_PLUGIN"
 	CmdWfMarketGodDump          Codes = "WARFRAME_MARKET_GOD_DUMP"
 	CmdWfMarketSilverDump       Codes = "WARFRAME_MARKET_SILVER_DUMP"
 	CmdWfRelics                 Codes = "WARFRAME_RELICS_PLUGIN"
@@ -91,7 +90,6 @@ var CodesInfo = map[Codes]CodeInfo{
 	CmdWfRivenMarket:            {Comm: `^(/RM|RM|/rm|rm)`, Permissions: PermUser},
 	CmdWfLichs:                  {Comm: `^(/CD|CD|赤毒|/cd|cd)`, Permissions: PermUser},
 	CmdWfSisters:                {Comm: `^(/XT|XT|信条|/xt|xt)`, Permissions: PermUser},
-	CmdWfPerlinSequence:         {Comm: `^(佩兰|佩兰数列|信条武器)$`, Permissions: PermUser},
 	CmdWfMarketGodDump:          {Comm: `^金垃圾$`, Permissions: PermUser},
 	CmdWfMarketSilverDump:       {Comm: `^银垃圾$`, Permissions: PermUser},
 	CmdWfRelics:                 {Comm: `^(核桃|查核桃)`, Permissions: PermUser},
@@ -138,7 +136,6 @@ var CodesOrder = []Codes{
 	CmdWfRivenMarket,
 	CmdWfLichs,
 	CmdWfSisters,
-	CmdWfPerlinSequence,
 	CmdWfMarketGodDump,
 	CmdWfMarketSilverDump,
 	CmdWfRelics,
