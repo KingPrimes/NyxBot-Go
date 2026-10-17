@@ -53,27 +53,8 @@ func FormatTimestamp(t time.Time) string {
 	return t.In(time.Local).Format("2006-01-02 15:04:05")
 }
 
-// factionOrder 派系匹配顺序（对齐 Java FactionEnum 声明顺序）。
-var factionOrder = []drawplugin.Faction{
-	drawplugin.FactionGrineer,
-	drawplugin.FactionCorpus,
-	drawplugin.FactionInfest,
-	drawplugin.FactionOrokin,
-	drawplugin.FactionCorrupted,
-	drawplugin.FactionSentient,
-	drawplugin.FactionNarmer,
-	drawplugin.FactionMurmur,
-	drawplugin.FactionScaldra,
-	drawplugin.FactionTechrot,
-	drawplugin.FactionDuviri,
-	drawplugin.FactionMitw,
-	drawplugin.FactionTenno,
-	drawplugin.FactionCrossfire,
-	drawplugin.FactionNone,
-}
-
 // factionKeyInfo 按派系键解析显示信息；空键返回无效，未知键回退未知派系。
-// 供裂隙/入侵等按枚举键取名的绘制使用（对齐 Java FactionEnum 直接取枚举）。
+// 供裂隙/仲裁/入侵等按枚举键取名的绘制使用（对齐 Java FactionEnum 直接取枚举）。
 func factionKeyInfo(key drawplugin.Faction) (drawplugin.FactionInfo, bool) {
 	if key == "" {
 		return drawplugin.FactionInfo{}, false
@@ -83,18 +64,6 @@ func factionKeyInfo(key drawplugin.Faction) (drawplugin.FactionInfo, bool) {
 		info = drawplugin.FactionMap[drawplugin.FactionNone]
 	}
 	return info, true
-}
-
-// matchFaction 按敌人标识匹配派系（对齐 Arbitration.getEnemy：枚举名包含 enemy 大写）。
-// 返回派系信息；未匹配回退 FC_NONE。
-func matchFaction(enemy string) drawplugin.FactionInfo {
-	upper := strings.ToUpper(enemy)
-	for _, key := range factionOrder {
-		if strings.Contains(string(key), upper) {
-			return drawplugin.FactionMap[key]
-		}
-	}
-	return drawplugin.FactionMap[drawplugin.FactionNone]
 }
 
 // maxF / maxI / minI 数值比较辅助（对应 Java Math.max/min 的常见调用，集中定义便于各绘制文件复用）。

@@ -3,9 +3,7 @@
 package tests
 
 import (
-	"encoding/json"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -31,6 +29,7 @@ func setupStage10DB(t *testing.T) {
 	}
 	if err := db.AutoMigrate(
 		&modelwarframe.Nodes{},
+		&modelwarframe.ArbitrationTier{},
 		&modelwarframe.StateTranslation{},
 		&modelwarframe.Relics{},
 		&modelwarframe.RelicRewards{},
@@ -44,100 +43,60 @@ func setupStage10DB(t *testing.T) {
 	t.Cleanup(func() { closeGlobalDB(t) })
 }
 
-// TestArbitrationToDraw 验证仲裁领域数据 → 绘图 DTO 的字段透传与时间解析。
+// TestArbitrationToDraw 验证仲裁领域数据 → 绘图 DTO：Unix 秒换算为时间，
+// 节点名（含星系）/ 任务类型 / 评级由 nodes 与 arbitration_tier 表在转换时补齐。
 func TestArbitrationToDraw(t *testing.T) {
-	start := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
-	end := start.Add(1 * time.Hour)
-	arb := warframe.Arbitration{
-		ID:         "arb-1",
-		Activation: start.Format(time.RFC3339),
-		Expiry:     end.Format(time.RFC3339),
-		Node:       "谷神星 葛兰塔峡谷",
-		Planet:     "谷神星",
-		Enemy:      "Grineer",
-		Type:       "拦截",
+	setupStage10DB(t)
+	if err := database.DB.Create(&modelwarframe.Nodes{
+		UniqueName: "SolNode64", Name: "Umbriel", SystemName: "天王星", MissionIndex: 13, FactionIndex: 7,
+	}).Error; err != nil {
+		t.Fatal(err)
 	}
-	dto := warframe.ArbitrationToDraw(arb)
+	if err := database.DB.Create(&modelwarframe.ArbitrationTier{Key: "SolNode64", Tier: "S"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	dto := warframe.ArbitrationToDraw(warframe.Arbitration{
+		Activation: start.Unix(),
+		NodeKey:    "SolNode64",
+		Expiry:     start.Add(time.Hour).Unix(),
+	})
 	if dto == nil {
 		t.Fatal("ArbitrationToDraw returned nil")
 	}
-	if dto.ID != "arb-1" || dto.Node != "谷神星 葛兰塔峡谷" || dto.Planet != "谷神星" {
-		t.Fatalf("field passthrough mismatch: %+v", dto)
+	if dto.Node != "Umbriel(天王星)" {
+		t.Fatalf("节点名应为「名称(星系)」格式, got %q", dto.Node)
 	}
-	if dto.Enemy != "Grineer" || dto.Type != "拦截" {
-		t.Fatalf("enemy/type mismatch: %+v", dto)
+	if dto.MissionName != "拦截" {
+		t.Fatalf("任务类型应由 nodes.mission_index 补齐, got %q", dto.MissionName)
 	}
-	if !dto.Activation.Equal(start) || !dto.Expiry.Equal(end) {
-		t.Fatalf("time parsing mismatch: act=%v exp=%v", dto.Activation, dto.Expiry)
+	if dto.Faction != drawplugin.FactionMurmur {
+		t.Fatalf("派系应由 nodes.faction_index 补齐, got %q", dto.Faction)
 	}
-	// 非法时间应解析为零值而非 panic
-	bad := warframe.ArbitrationToDraw(warframe.Arbitration{Activation: "not-a-time", Expiry: ""})
-	if !bad.Activation.IsZero() {
-		t.Fatalf("invalid activation should be zero, got %v", bad.Activation)
+	if dto.Tier != "S" {
+		t.Fatalf("评级应由 arbitration_tier 表补齐, got %q", dto.Tier)
 	}
-}
-
-// TestArbitrationJSONFields 验证仲裁 API 原始 JSON 字段映射（任务类型为 missionType，ID 即开始时间戳）。
-func TestArbitrationJSONFields(t *testing.T) {
-	const raw = `[{"id":"1762261200","activation":"2025-11-04T13:00:00.000Z","startString":"-24m -54s",` +
-		`"expiry":"2025-11-04T14:00:00.000Z","node":"Gabii (谷神星)","missionType":"生存",` +
-		`"enemy":"Infestation","eta":"36m 6s","bounds":{"resourceBonus":0.35}}]`
-	var list []warframe.Arbitration
-	if err := json.Unmarshal([]byte(raw), &list); err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 {
-		t.Fatalf("expect 1 entry, got %d", len(list))
-	}
-	arb := list[0]
-	if arb.Type != "生存" {
-		t.Fatalf("missionType 未映射到 Type: %q", arb.Type)
-	}
-	if arb.Node != "Gabii (谷神星)" || arb.Enemy != "Infestation" {
-		t.Fatalf("node/enemy 映射异常: %+v", arb)
-	}
-	// 用户约定：ID 就是任务开始的时间戳（Unix 秒），应与 activation 一致
-	activation, err := time.Parse(time.RFC3339, arb.Activation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strconv.FormatInt(activation.Unix(), 10) != arb.ID {
-		t.Fatalf("id %q 与 activation %v 不一致", arb.ID, activation)
+	if !dto.Activation.Equal(start) || !dto.Expiry.Equal(start.Add(time.Hour)) {
+		t.Fatalf("Unix 秒应换算为对应时间: act=%v exp=%v", dto.Activation, dto.Expiry)
 	}
 }
 
-// TestArbitrationIsWorth 验证「值得参与」判断（对齐 Java Arbitration.isWorth 三重匹配）。
-func TestArbitrationIsWorth(t *testing.T) {
-	cases := []struct {
-		name string
-		arb  warframe.Arbitration
-		want bool
-	}{
-		{"拦截+谷神星+Grineer", warframe.Arbitration{Type: "拦截", Node: "Stöfler (谷神星)", Enemy: "Grineer"}, true},
-		{"防御+水星+Infestation", warframe.Arbitration{Type: "防御", Node: "Sinai (水星)", Enemy: "Infestation"}, true},
-		{"生存不算", warframe.Arbitration{Type: "生存", Node: "Gabii (谷神星)", Enemy: "Infestation"}, false},
-		{"非谷神星/水星不算", warframe.Arbitration{Type: "防御", Node: "Coba (地球)", Enemy: "Infestation"}, false},
-		{"Corpus 不算", warframe.Arbitration{Type: "防御", Node: "Sinai (水星)", Enemy: "Corpus"}, false},
-		{"任务类型为空不算", warframe.Arbitration{Node: "Stöfler (谷神星)", Enemy: "Grineer"}, false},
-	}
-	for _, tc := range cases {
-		if got := tc.arb.IsWorth(); got != tc.want {
-			t.Errorf("%s: IsWorth()=%v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
+// TestArbitrationToDrawUnknownNode 节点未收录时评级回退 F、节点名回退原文，且不 panic。
+func TestArbitrationToDrawUnknownNode(t *testing.T) {
+	setupStage10DB(t)
+	useUntranslatedFile(t)
 
-// TestArbitrationActivationFallbackToID 验证 activation 非法时回退 ID（Unix 秒时间戳）。
-func TestArbitrationActivationFallbackToID(t *testing.T) {
-	base := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
-	arb := warframe.Arbitration{
-		ID:         strconv.FormatInt(base.Unix(), 10),
-		Activation: "not-a-time",
-		Expiry:     base.Add(time.Hour).Format(time.RFC3339),
+	dto := warframe.ArbitrationToDraw(warframe.Arbitration{
+		Activation: 1762261200,
+		NodeKey:    "SolNode999",
+		Expiry:     1762264800,
+	})
+	if dto.Node != "SolNode999" {
+		t.Fatalf("未收录节点应回退原文, got %q", dto.Node)
 	}
-	dto := warframe.ArbitrationToDraw(arb)
-	if !dto.Activation.Equal(base) {
-		t.Fatalf("activation 应回退为 ID 时间戳 %v, got %v", base, dto.Activation)
+	if dto.Tier != "F" {
+		t.Fatalf("未收录节点评级应为 F, got %q", dto.Tier)
 	}
 }
 
@@ -219,13 +178,9 @@ func TestTranslateNodeAndStateName(t *testing.T) {
 func TestDrawChainNonEmpty(t *testing.T) {
 	base := time.Now().Add(-30 * time.Minute)
 	arbDTO := warframe.ArbitrationToDraw(warframe.Arbitration{
-		ID:         "a",
-		Activation: base.Format(time.RFC3339),
-		Expiry:     base.Add(30 * time.Minute).Format(time.RFC3339),
-		Node:       "谷神星 葛兰塔峡谷",
-		Planet:     "谷神星",
-		Enemy:      "Grineer",
-		Type:       "拦截",
+		Activation: base.Unix(),
+		Expiry:     base.Add(30 * time.Minute).Unix(),
+		NodeKey:    "SolNode64",
 	})
 	if image := draw.DrawArbitration(arbDTO); len(image) == 0 {
 		t.Fatal("DrawArbitration returned empty image")

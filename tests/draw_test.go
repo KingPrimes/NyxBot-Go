@@ -85,28 +85,29 @@ func TestDrawHelpImage(t *testing.T) {
 	}
 }
 
-// TestDrawArbitrationImage 仲裁卡片图。
+// TestDrawArbitrationImage 仲裁卡片图（高评级与无分级两种评级文案/配色）。
 func TestDrawArbitrationImage(t *testing.T) {
 	base := now()
 	data := draw.DrawArbitration(&draw.Arbitration{
-		Activation: base.Add(-30 * time.Minute),
-		Expiry:     base.Add(90 * time.Minute),
-		ID:         "arb-test",
-		Node:       "谷神星 Bode",
-		Enemy:      "Grineer",
-		Type:       "拦截",
+		Activation:  base.Add(-30 * time.Minute),
+		Expiry:      base.Add(90 * time.Minute),
+		Node:        "Umbriel(天王星)",
+		MissionName: "拦截",
+		Faction:     drawplugin.FactionMurmur,
+		Tier:        "S",
 	})
 	assertPNG(t, "draw_arbitration.png", data)
 
-	// 不值得参与的仲裁（派系不匹配）
+	// 无分级节点：评级与配色按 F 渲染
 	data = draw.DrawArbitration(&draw.Arbitration{
-		Activation: base.Add(-1 * time.Hour),
-		Expiry:     base.Add(2 * time.Hour),
-		Node:       "地球 Gaia",
-		Enemy:      "Corpus",
-		Type:       "捕获",
+		Activation:  base.Add(-1 * time.Hour),
+		Expiry:      base.Add(2 * time.Hour),
+		Node:        "Gaia(地球)",
+		MissionName: "捕获",
+		Faction:     drawplugin.FactionCorpus,
+		Tier:        "",
 	})
-	assertPNG(t, "draw_arbitration_notworth.png", data)
+	assertPNG(t, "draw_arbitration_tier_f.png", data)
 }
 
 // TestFormatTimestampLocalTimeZone 验证时间文本按本地时区渲染（对齐 Java TimeZoneUtil 取系统时区）。
@@ -128,16 +129,54 @@ func TestFormatTimestampLocalTimeZone(t *testing.T) {
 	}
 }
 
-// TestDrawArbitrationsImage 值得参与的仲裁列表图。
+// TestDrawArbitrationsImage 仲裁前瞻列表图（列表已由 warframe 层按评级过滤，此处只渲染）。
 func TestDrawArbitrationsImage(t *testing.T) {
 	base := now()
 	list := []*draw.Arbitration{
-		{Activation: base.Add(-1 * time.Hour), Expiry: base.Add(1 * time.Hour), Node: "谷神星 Bode", Enemy: "Grineer", Type: "拦截"},
-		{Activation: base.Add(-2 * time.Hour), Expiry: base.Add(30 * time.Minute), Node: "水星 M Prime", Enemy: "Infested", Type: "防御"},
-		{Activation: base.Add(-3 * time.Hour), Expiry: base.Add(2 * time.Hour), Node: "地球 Gaia", Enemy: "Corpus", Type: "捕获"},
-		{Activation: base.Add(-1 * time.Hour), Expiry: base.Add(4 * time.Hour), Node: "谷神星 Draco", Enemy: "Grineer", Type: "防御"},
+		{Activation: base.Add(-1 * time.Hour), Expiry: base.Add(1 * time.Hour), Node: "Alator(火星)", MissionName: "拦截", Faction: drawplugin.FactionGrineer, Tier: "S"},
+		{Activation: base.Add(-2 * time.Hour), Expiry: base.Add(30 * time.Minute), Node: "Cytherean(金星)", MissionName: "防御", Faction: drawplugin.FactionCorpus, Tier: "A"},
+		{Activation: base.Add(-3 * time.Hour), Expiry: base.Add(2 * time.Hour), Node: "Xini(阋神星)", MissionName: "拦截", Faction: drawplugin.FactionInfest, Tier: "B"},
+		{Activation: base.Add(-1 * time.Hour), Expiry: base.Add(4 * time.Hour), Node: "Sechura(冥王星)", MissionName: "防御", Faction: drawplugin.FactionCorpus, Tier: "B"},
 	}
 	assertPNG(t, "draw_arbitrations.png", draw.DrawArbitrations(list))
+
+	// 上限 10 条：14 条与恰好 10 条的出图高度应一致（多余的被截断）
+	_, heightAtTen := assertPNG(t, "draw_arbitrations_10.png", draw.DrawArbitrations(arbitrationListFixture(10)))
+	_, heightAtLimit := assertPNG(t, "draw_arbitrations_limit.png", draw.DrawArbitrations(arbitrationListFixture(14)))
+	if heightAtLimit != heightAtTen {
+		t.Fatalf("列表图应截断到 10 条：14 条出图高 %d，10 条出图高 %d", heightAtLimit, heightAtTen)
+	}
+	// 仅断言「14 条 == 10 条」在上限被退回 5 时同样成立，故还需断言 10 条确实比 5 条高
+	_, heightAtFive := assertPNG(t, "draw_arbitrations_5.png", draw.DrawArbitrations(arbitrationListFixture(5)))
+	if heightAtFive >= heightAtTen {
+		t.Fatalf("10 条应比 5 条高（否则上限可能被退回 5）：5 条高 %d，10 条高 %d", heightAtFive, heightAtTen)
+	}
+
+	// 空列表与全 nil 列表应返回 nil 而非崩溃
+	if data := draw.DrawArbitrations(nil); data != nil {
+		t.Fatal("空列表应返回 nil")
+	}
+	if data := draw.DrawArbitrations([]*draw.Arbitration{nil}); data != nil {
+		t.Fatal("全 nil 列表应返回 nil")
+	}
+}
+
+// arbitrationListFixture 生成 n 条仲裁列表条目（评级轮转 S/A/B/C/D/F），用于列表图上限断言。
+func arbitrationListFixture(n int) []*draw.Arbitration {
+	base := now()
+	tiers := []string{"S", "A", "B", "C", "D", "F"}
+	list := make([]*draw.Arbitration, 0, n)
+	for index := range n {
+		list = append(list, &draw.Arbitration{
+			Activation:  base.Add(time.Duration(index-2) * time.Hour),
+			Expiry:      base.Add(time.Duration(index+1) * time.Hour),
+			Node:        "测试节点(谷神星)",
+			MissionName: "拦截",
+			Faction:     drawplugin.FactionGrineer,
+			Tier:        tiers[index%len(tiers)],
+		})
+	}
+	return list
 }
 
 // TestDrawAllInfoImage 系统信息图。

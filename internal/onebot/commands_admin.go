@@ -16,6 +16,8 @@ type DataUpdateExecutor interface {
 	UpdateRivenItems(ctx context.Context) error
 	UpdateLichSister(ctx context.Context) error
 	UpdateTranslation(ctx context.Context) error
+	UpdateArbitration(ctx context.Context) error
+	UpdateArbitrationTiers(ctx context.Context) error
 }
 
 // SetDataExecutor 注入管理类数据更新执行器（Register 前调用）。
@@ -50,6 +52,20 @@ func (registry *CommandRegistry) wfUpdateLichSister(ctx *zero.Ctx, _ string) err
 func (registry *CommandRegistry) wfUpdateTranslation(ctx *zero.Ctx, _ string) error {
 	return registry.dataUpdateRun(ctx, "翻译数据", func(e DataUpdateExecutor) func(context.Context) error {
 		return e.UpdateTranslation
+	})
+}
+
+// wfUpdateArbitration 处理「更新仲裁」：管理员异步重拉仲裁时间表（browse.wf/arbys.txt）。
+func (registry *CommandRegistry) wfUpdateArbitration(ctx *zero.Ctx, _ string) error {
+	return registry.dataUpdateRun(ctx, "仲裁", func(e DataUpdateExecutor) func(context.Context) error {
+		return e.UpdateArbitration
+	})
+}
+
+// wfUpdateArbitrationTiers 处理「更新分级」：管理员异步重拉仲裁节点分级（CDN 的 arbitration_tiers.json）。
+func (registry *CommandRegistry) wfUpdateArbitrationTiers(ctx *zero.Ctx, _ string) error {
+	return registry.dataUpdateRun(ctx, "分级", func(e DataUpdateExecutor) func(context.Context) error {
+		return e.UpdateArbitrationTiers
 	})
 }
 

@@ -160,6 +160,16 @@ func (h *DataHandler) UpdateAlias(c *gin.Context) {
 	h.updateRespond(c, "别名数据", h.importer.ImportAlias)
 }
 
+// UpdateArbitration 处理 POST /data/warframe/arbitration/update：强制重拉仲裁时间表。
+func (h *DataHandler) UpdateArbitration(c *gin.Context) {
+	h.updateRespond(c, "仲裁数据", h.importer.UpdateArbitration)
+}
+
+// UpdateArbitrationTiers 处理 POST /data/warframe/arbitration-tiers/update：重拉节点分级。
+func (h *DataHandler) UpdateArbitrationTiers(c *gin.Context) {
+	h.updateRespond(c, "仲裁分级数据", h.importer.UpdateArbitrationTiers)
+}
+
 // UpdateEphemeras 处理 POST /data/warframe/ephemeras/update。
 func (h *DataHandler) UpdateEphemeras(c *gin.Context) {
 	h.updateRespond(c, "幻纹数据", h.importer.UpdateEphemeras)

@@ -90,6 +90,7 @@ func (importer *DataImporter) ImportAll(ctx context.Context) {
 		{"riven-tion-alias", importer.ImportRivenTionAlias},
 		{"riven-analyse", importer.ImportRivenAnalyseTrend},
 		{"nodes", importer.ImportNodes},
+		{"arbitration-tiers", importer.ImportArbitrationTiers},
 		{"weapons", importer.ImportWeapons},
 		{"night-wave", importer.ImportNightWave},
 		{"warframes", importer.ImportWarframes},
@@ -503,6 +504,47 @@ func (importer *DataImporter) ImportAlias(_ context.Context) error {
 		})
 	}
 	return batchSave(importer.db, upserts, false)
+}
+
+// ImportArbitrationTiers 从 CDN arbitration_tiers.json 导入仲裁节点分级（空数据抛错）。
+// 纯 CDN、无本地兜底、无缓存（见 plans/arbitration-tier-plan.md §4.0.5）；key 即主键，
+// batchSave 的 Save 语义天然按 key 覆盖，无需像 ImportAlias 那样另取业务键复用 id。
+// CDN 文件是**权威快照**：本次快照未出现的 key 会在同一事务里删除，避免节点被移除后
+// 旧评级残留在表里继续影响前瞻列表；整表替换与写入同事务，失败即回滚。
+// CDN 上文件缺失时返回错误，由调用侧降级（启动导入只告警、指令回「更新失败！」）。
+func (importer *DataImporter) ImportArbitrationTiers(_ context.Context) error {
+	raw, err := cdnFileFetcher("warframe/arbitration_tiers.json")
+	if err != nil {
+		return err
+	}
+	var records []modelwarframe.ArbitrationTier
+	if err := json.Unmarshal(raw, &records); err != nil {
+		return fmt.Errorf("parse arbitration_tiers.json: %w", err)
+	}
+	if len(records) == 0 {
+		return fmt.Errorf("arbitration_tiers.json is empty")
+	}
+	upserts := make([]modelwarframe.ArbitrationTier, 0, len(records))
+	for _, record := range records {
+		if record.Key == "" {
+			continue
+		}
+		upserts = append(upserts, modelwarframe.ArbitrationTier{Key: record.Key, Tier: record.Tier})
+	}
+	if len(upserts) == 0 {
+		return fmt.Errorf("arbitration_tiers.json has no usable record")
+	}
+	return importer.db.Transaction(func(tx *gorm.DB) error {
+		keys := make([]string, 0, len(upserts))
+		for _, record := range upserts {
+			keys = append(keys, record.Key)
+		}
+		// 先删本次快照未包含的行，再写入/覆盖，使表内容与 CDN 快照严格一致
+		if err := tx.Where("key NOT IN ?", keys).Delete(&modelwarframe.ArbitrationTier{}).Error; err != nil {
+			return fmt.Errorf("prune arbitration_tier: %w", err)
+		}
+		return batchSave(tx, upserts, false)
+	})
 }
 
 // ImportRivenTion 从 CDN market_riven_tion.json 导入（按 urlName 业务键智能更新）。
